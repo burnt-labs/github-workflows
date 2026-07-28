@@ -5,6 +5,7 @@ import { parse, printParseErrorCode } from "jsonc-parser";
 
 const QUALITY_PATH = ".github/quality-policy.jsonc";
 const DEPLOYMENT_PATH = ".github/deployment-policy.jsonc";
+const NPM_PATH = ".github/npm-policy.jsonc";
 const REQUIRED_COMMANDS = [
   "install",
   "lint",
@@ -108,7 +109,37 @@ export function validateDeploymentPolicy(policy) {
   return policy;
 }
 
-export function loadPolicies(root = process.cwd(), deploymentRequired = false) {
+export function validateNpmPolicy(policy) {
+  if (!policy || typeof policy !== "object" || Array.isArray(policy)) {
+    throw new Error("npm policy must be an object");
+  }
+  if (policy.schemaVersion !== 1) {
+    throw new Error("npm schemaVersion must equal 1");
+  }
+  if (!["manual", "automatic"].includes(policy.promotionMode)) {
+    throw new Error("npm promotionMode must be manual or automatic");
+  }
+  requireString(policy.workingDirectory, "npm workingDirectory");
+  requireString(policy.versionFile, "npm versionFile");
+  if (policy.access !== "public") {
+    throw new Error("npm access must be public");
+  }
+  requireString(policy.candidateDistTag, "npm candidateDistTag");
+  requireString(policy.releaseDistTag, "npm releaseDistTag");
+  if (policy.candidateDistTag === policy.releaseDistTag) {
+    throw new Error("npm candidate and release dist-tags must differ");
+  }
+  if (policy.releaseDistTag !== "latest") {
+    throw new Error("npm releaseDistTag must be latest");
+  }
+  return policy;
+}
+
+export function loadPolicies(
+  root = process.cwd(),
+  deploymentRequired = false,
+  npmRequired = false,
+) {
   const qualityFile = path.join(root, QUALITY_PATH);
   const quality = validateQualityPolicy(
     parseJsonc(fs.readFileSync(qualityFile, "utf8"), qualityFile),
@@ -120,7 +151,14 @@ export function loadPolicies(root = process.cwd(), deploymentRequired = false) {
       parseJsonc(fs.readFileSync(deploymentFile, "utf8"), deploymentFile),
     );
   }
-  return { quality, deployment };
+  let npm;
+  const npmFile = path.join(root, NPM_PATH);
+  if (npmRequired || fs.existsSync(npmFile)) {
+    npm = validateNpmPolicy(
+      parseJsonc(fs.readFileSync(npmFile, "utf8"), npmFile),
+    );
+  }
+  return { quality, deployment, npm };
 }
 
 function writeOutput(name, value) {
@@ -132,13 +170,19 @@ function writeOutput(name, value) {
 
 export function runPolicy() {
   const deploymentRequired = process.argv.includes("--deployment");
-  const { quality, deployment } = loadPolicies(
+  const npmRequired = process.argv.includes("--npm");
+  const { quality, deployment, npm } = loadPolicies(
     process.env.POLICY_ROOT ?? process.cwd(),
     deploymentRequired,
+    npmRequired,
   );
   writeOutput("quality", JSON.stringify(quality));
   if (deployment) {
     writeOutput("deployment", JSON.stringify(deployment));
     writeOutput("promotion-mode", deployment.promotionMode);
+  }
+  if (npm) {
+    writeOutput("npm", JSON.stringify(npm));
+    writeOutput("npm-promotion-mode", npm.promotionMode);
   }
 }

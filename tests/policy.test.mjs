@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   parseJsonc,
   validateDeploymentPolicy,
+  validateNpmPolicy,
   validateQualityPolicy,
 } from "../scripts/policy.mjs";
 
@@ -19,6 +20,18 @@ function qualityPolicy() {
       coverage: "pnpm coverage",
       build: "pnpm build",
     },
+  };
+}
+
+function npmPolicy() {
+  return {
+    schemaVersion: 1,
+    promotionMode: "manual",
+    workingDirectory: ".",
+    versionFile: "package.json",
+    access: "public",
+    candidateDistTag: "next",
+    releaseDistTag: "latest",
   };
 }
 
@@ -81,4 +94,14 @@ test("JSONC supports comments and trailing commas", () => {
   assert.deepEqual(parseJsonc('{ // comment\n"ok": true,\n}', "test"), {
     ok: true,
   });
+});
+
+test("npm requires distinct candidate and latest release tags", () => {
+  assert.deepEqual(validateNpmPolicy(npmPolicy()), npmPolicy());
+  const sameTag = npmPolicy();
+  sameTag.candidateDistTag = "latest";
+  assert.throws(() => validateNpmPolicy(sameTag), /must differ/);
+  const restricted = npmPolicy();
+  restricted.access = "restricted";
+  assert.throws(() => validateNpmPolicy(restricted), /must be public/);
 });

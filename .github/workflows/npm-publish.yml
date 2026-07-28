@@ -1,0 +1,85 @@
+name: Burnt npm Publish
+
+on:
+  workflow_call:
+    inputs:
+      quality-policy:
+        required: true
+        type: string
+      npm-policy:
+        required: true
+        type: string
+      version:
+        required: true
+        type: string
+      dist-tag:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: Publish ${{ inputs.dist-tag }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ fromJSON(inputs.quality-policy).workingDirectory }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          registry-url: https://registry.npmjs.org
+      - run: corepack enable
+      - name: Install npm with trusted publishing support
+        run: npm install --global npm@11
+      - name: Install
+        run: ${{ fromJSON(inputs.quality-policy).commands.install }}
+      - name: Set publish version without committing
+        env:
+          VERSION: ${{ inputs.version }}
+          VERSION_FILE: ${{ fromJSON(inputs.npm-policy).versionFile }}
+        run: |
+          node - <<'NODE'
+          const fs = require("node:fs");
+          const file = process.env.VERSION_FILE;
+          const pkg = JSON.parse(fs.readFileSync(file, "utf8"));
+          pkg.version = process.env.VERSION;
+          fs.writeFileSync(file, `${JSON.stringify(pkg, null, 2)}\n`);
+          NODE
+      - name: Build
+        run: ${{ fromJSON(inputs.quality-policy).commands.build }}
+      - name: Read package name
+        id: package
+        env:
+          VERSION_FILE: ${{ fromJSON(inputs.npm-policy).versionFile }}
+        run: echo "name=$(node -p "require('./' + process.env.VERSION_FILE).name")" >> "$GITHUB_OUTPUT"
+      - name: Check immutable version
+        id: existing
+        env:
+          PACKAGE_NAME: ${{ steps.package.outputs.name }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          if npm view "$PACKAGE_NAME@$VERSION" version --registry https://registry.npmjs.org >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Publish with provenance
+        if: steps.existing.outputs.exists == 'false'
+        run: >-
+          npm publish
+          --access ${{ fromJSON(inputs.npm-policy).access }}
+          --tag ${{ inputs.dist-tag }}
+          --provenance
+      - name: Report package
+        run: |
+          {
+            echo "### npm publication"
+            echo "- Package: \`${{ steps.package.outputs.name }}@${{ inputs.version }}\`"
+            echo "- Dist-tag: \`${{ inputs.dist-tag }}\`"
+            echo "- Already existed: \`${{ steps.existing.outputs.exists }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,40 @@
+name: Burnt npm PR
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@dc8b20de30c0204633d572630078e06459fb89b9
+
+  pack:
+    name: Package dry run
+    needs: quality
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ fromJSON(needs.quality.outputs.npm-policy).workingDirectory }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          registry-url: https://registry.npmjs.org
+      - run: corepack enable
+      - name: Install
+        run: ${{ fromJSON(needs.quality.outputs.quality-policy).commands.install }}
+      - name: Build
+        run: ${{ fromJSON(needs.quality.outputs.quality-policy).commands.build }}
+      - name: Validate package contents
+        run: npm pack --dry-run --json | tee "$RUNNER_TEMP/npm-pack.json"
+      - name: Summarize package
+        run: |
+          {
+            echo "### npm package preview"
+            echo '```json'
+            cat "$RUNNER_TEMP/npm-pack.json"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
