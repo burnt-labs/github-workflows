@@ -15,6 +15,11 @@ on:
       dist-tag:
         required: true
         type: string
+    outputs:
+      package-name:
+        value: ${{ jobs.publish.outputs.package-name }}
+      package-version:
+        value: ${{ jobs.publish.outputs.package-version }}
 
 permissions:
   contents: read
@@ -24,6 +29,9 @@ jobs:
   publish:
     name: Publish ${{ inputs.dist-tag }}
     runs-on: ubuntu-latest
+    outputs:
+      package-name: ${{ steps.package.outputs.name }}
+      package-version: ${{ inputs.version }}
     defaults:
       run:
         working-directory: ${{ fromJSON(inputs.quality-policy).workingDirectory }}

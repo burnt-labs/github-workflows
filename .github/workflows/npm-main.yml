@@ -1,0 +1,150 @@
+name: Burnt npm Main Promotion
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@07c4ce2cc858699c7ef92353fccefe986ab8130e
+
+  metadata:
+    needs: quality
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ fromJSON(needs.quality.outputs.npm-policy).workingDirectory }}
+    outputs:
+      candidate-tag: ${{ steps.metadata.outputs.candidate-tag }}
+      candidate-version: ${{ steps.versions.outputs.candidate-version }}
+      release-tag: ${{ steps.metadata.outputs.release-tag }}
+      release-version: ${{ steps.versions.outputs.release-version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: burnt-labs/github-workflows
+          ref: eff35146e19c05447efb38f0cc68e9587a7331c0
+          path: .burnt-workflows
+      - name: Read stable release tags
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --paginate "repos/${{ github.repository }}/releases?per_page=100" \
+            --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name' \
+            > "$RUNNER_TEMP/release-tags.txt"
+      - id: metadata
+        env:
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          VERSION_FILE: ${{ fromJSON(needs.quality.outputs.npm-policy).versionFile }}
+        run: |
+          RELEASE_TAGS="$(cat "$RUNNER_TEMP/release-tags.txt")" \
+            node "$GITHUB_WORKSPACE/.burnt-workflows/scripts/release-metadata.mjs"
+      - id: versions
+        env:
+          CANDIDATE_TAG: ${{ steps.metadata.outputs.candidate-tag }}
+          RELEASE_TAG: ${{ steps.metadata.outputs.release-tag }}
+        run: |
+          echo "candidate-version=${CANDIDATE_TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "release-version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
+
+  publish-candidate:
+    needs: [quality, metadata]
+    permissions:
+      contents: read
+      id-token: write
+    uses: burnt-labs/github-workflows/.github/workflows/npm-publish.yml@17d6fe477e3e95ceb7db1903b6c63a01e247b8b1
+    with:
+      quality-policy: ${{ needs.quality.outputs.quality-policy }}
+      npm-policy: ${{ needs.quality.outputs.npm-policy }}
+      version: ${{ needs.metadata.outputs.candidate-version }}
+      dist-tag: ${{ fromJSON(needs.quality.outputs.npm-policy).candidateDistTag }}
+
+  create-releases:
+    needs: [quality, metadata, publish-candidate]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_TAG: ${{ needs.metadata.outputs.candidate-tag }}
+          RELEASE_TAG: ${{ needs.metadata.outputs.release-tag }}
+          PACKAGE_NAME: ${{ needs.publish-candidate.outputs.package-name }}
+          PACKAGE_VERSION: ${{ needs.publish-candidate.outputs.package-version }}
+        run: |
+          cat > "$RUNNER_TEMP/notes.md" <<EOF
+          ## npm release candidate
+
+          - Package: \`$PACKAGE_NAME@$PACKAGE_VERSION\`
+          - npm: https://www.npmjs.com/package/$PACKAGE_NAME/v/$PACKAGE_VERSION
+          - Commit: \`${{ github.sha }}\`
+          EOF
+          if gh release view "$CANDIDATE_TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release edit "$CANDIDATE_TAG" \
+              --repo "${{ github.repository }}" \
+              --title "$CANDIDATE_TAG" \
+              --notes-file "$RUNNER_TEMP/notes.md"
+          else
+            gh release create "$CANDIDATE_TAG" \
+              --repo "${{ github.repository }}" \
+              --target "${{ github.sha }}" \
+              --prerelease \
+              --title "$CANDIDATE_TAG" \
+              --notes-file "$RUNNER_TEMP/notes.md"
+          fi
+          if gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" \
+              --repo "${{ github.repository }}" \
+              --target "${{ github.sha }}" \
+              --title "$RELEASE_TAG" \
+              --notes-file "$RUNNER_TEMP/notes.md"
+          else
+            gh release create "$RELEASE_TAG" \
+              --repo "${{ github.repository }}" \
+              --target "${{ github.sha }}" \
+              --draft \
+              --title "$RELEASE_TAG" \
+              --notes-file "$RUNNER_TEMP/notes.md"
+          fi
+
+  publish-release-automatic:
+    needs: [quality, metadata, create-releases]
+    if: needs.quality.outputs.npm-promotion-mode == 'automatic'
+    permissions:
+      contents: read
+      id-token: write
+    uses: burnt-labs/github-workflows/.github/workflows/npm-publish.yml@17d6fe477e3e95ceb7db1903b6c63a01e247b8b1
+    with:
+      quality-policy: ${{ needs.quality.outputs.quality-policy }}
+      npm-policy: ${{ needs.quality.outputs.npm-policy }}
+      version: ${{ needs.metadata.outputs.release-version }}
+      dist-tag: ${{ fromJSON(needs.quality.outputs.npm-policy).releaseDistTag }}
+
+  publish-github-release:
+    needs: [metadata, publish-release-automatic]
+    if: needs.publish-release-automatic.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.metadata.outputs.release-tag }}
+          PACKAGE_NAME: ${{ needs.publish-release-automatic.outputs.package-name }}
+          PACKAGE_VERSION: ${{ needs.publish-release-automatic.outputs.package-version }}
+        run: |
+          gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" --json body --jq .body > "$RUNNER_TEMP/body.md"
+          {
+            echo
+            echo "## npm release"
+            echo
+            echo "- Package: \`$PACKAGE_NAME@$PACKAGE_VERSION\`"
+            echo "- npm: https://www.npmjs.com/package/$PACKAGE_NAME/v/$PACKAGE_VERSION"
+          } >> "$RUNNER_TEMP/body.md"
+          gh release edit "$RELEASE_TAG" \
+            --repo "${{ github.repository }}" \
+            --draft=false \
+            --notes-file "$RUNNER_TEMP/body.md"

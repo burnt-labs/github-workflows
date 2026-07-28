@@ -65,3 +65,33 @@ test("release candidates cannot deploy the release target", () => {
   assert.match(source, /inputs\.prerelease == false/);
   assert.match(source, /promotion-mode == 'manual'/);
 });
+
+test("npm uses trusted publishing without tokens or commits", () => {
+  const source = fs.readFileSync(`${directory}/npm-publish.yml`, "utf8");
+  assert.match(source, /id-token: write/);
+  assert.match(source, /npm publish/);
+  assert.match(source, /--provenance/);
+  assert.doesNotMatch(source, /NPM_TOKEN|NODE_AUTH_TOKEN/);
+  assert.doesNotMatch(source, /\bgit (commit|push)\b/);
+});
+
+test("npm promotes next before latest", () => {
+  const source = fs.readFileSync(`${directory}/npm-main.yml`, "utf8");
+  const workflow = parse(source);
+  assert.deepEqual(workflow.jobs["create-releases"].needs, [
+    "quality",
+    "metadata",
+    "publish-candidate",
+  ]);
+  assert.deepEqual(workflow.jobs["publish-release-automatic"].needs, [
+    "quality",
+    "metadata",
+    "create-releases",
+  ]);
+  assert.equal(
+    workflow.jobs["publish-release-automatic"].if,
+    "needs.quality.outputs.npm-promotion-mode == 'automatic'",
+  );
+  assert.match(source, /candidateDistTag/);
+  assert.match(source, /releaseDistTag/);
+});

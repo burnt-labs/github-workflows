@@ -1,0 +1,73 @@
+name: Burnt npm Published Release
+
+on:
+  workflow_call:
+    inputs:
+      release-tag:
+        required: true
+        type: string
+      prerelease:
+        required: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@07c4ce2cc858699c7ef92353fccefe986ab8130e
+
+  metadata:
+    needs: quality
+    if: inputs.prerelease == false
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - id: version
+        env:
+          RELEASE_TAG: ${{ inputs.release-tag }}
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Release tag must be strict vMAJOR.MINOR.PATCH"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+  publish-release:
+    needs: [quality, metadata]
+    if: needs.quality.outputs.npm-promotion-mode == 'manual'
+    permissions:
+      contents: read
+      id-token: write
+    uses: burnt-labs/github-workflows/.github/workflows/npm-publish.yml@17d6fe477e3e95ceb7db1903b6c63a01e247b8b1
+    with:
+      quality-policy: ${{ needs.quality.outputs.quality-policy }}
+      npm-policy: ${{ needs.quality.outputs.npm-policy }}
+      version: ${{ needs.metadata.outputs.version }}
+      dist-tag: ${{ fromJSON(needs.quality.outputs.npm-policy).releaseDistTag }}
+
+  annotate-release:
+    needs: publish-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release-tag }}
+          PACKAGE_NAME: ${{ needs.publish-release.outputs.package-name }}
+          PACKAGE_VERSION: ${{ needs.publish-release.outputs.package-version }}
+        run: |
+          gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" --json body --jq .body > "$RUNNER_TEMP/body.md"
+          {
+            echo
+            echo "## npm release"
+            echo
+            echo "- Package: \`$PACKAGE_NAME@$PACKAGE_VERSION\`"
+            echo "- npm: https://www.npmjs.com/package/$PACKAGE_NAME/v/$PACKAGE_VERSION"
+          } >> "$RUNNER_TEMP/body.md"
+          gh release edit "$RELEASE_TAG" \
+            --repo "${{ github.repository }}" \
+            --notes-file "$RUNNER_TEMP/body.md"
