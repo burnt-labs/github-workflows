@@ -1,0 +1,71 @@
+name: Burnt Required Quality
+
+on:
+  pull_request:
+  merge_group:
+  workflow_call:
+    outputs:
+      quality-policy:
+        description: Validated quality policy
+        value: ${{ jobs.policy.outputs.quality }}
+      deployment-policy:
+        description: Validated deployment policy when present
+        value: ${{ jobs.policy.outputs.deployment }}
+      promotion-mode:
+        description: Manual or automatic when deployment policy is present
+        value: ${{ jobs.policy.outputs.promotion-mode }}
+
+permissions:
+  contents: read
+
+jobs:
+  policy:
+    name: Policy
+    runs-on: ubuntu-latest
+    outputs:
+      quality: ${{ steps.policy.outputs.quality }}
+      deployment: ${{ steps.policy.outputs.deployment }}
+      promotion-mode: ${{ steps.policy.outputs.promotion-mode }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Checkout central policy tools
+        uses: actions/checkout@v4
+        with:
+          repository: burnt-labs/github-workflows
+          ref: main
+          path: .burnt-workflows
+      - id: policy
+        name: Validate policies
+        run: node .burnt-workflows/scripts/policy.bundle.mjs
+
+  quality:
+    name: Quality
+    needs: policy
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ fromJSON(needs.policy.outputs.quality).workingDirectory }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+      - name: Enable Corepack
+        run: corepack enable
+      - name: Install
+        run: ${{ fromJSON(needs.policy.outputs.quality).commands.install }}
+      - name: Lint
+        run: ${{ fromJSON(needs.policy.outputs.quality).commands.lint }}
+      - name: Prettier
+        run: ${{ fromJSON(needs.policy.outputs.quality).commands.prettier }}
+      - name: Type-check
+        run: ${{ fromJSON(needs.policy.outputs.quality).commands.typeCheck }}
+      - name: Test
+        run: ${{ fromJSON(needs.policy.outputs.quality).commands.test }}
+      - name: Coverage
+        run: ${{ fromJSON(needs.policy.outputs.quality).commands.coverage }}
+      - name: Build
+        run: ${{ fromJSON(needs.policy.outputs.quality).commands.build }}

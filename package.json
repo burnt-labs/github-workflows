@@ -1,0 +1,20 @@
+{
+  "name": "@burnt-labs/github-workflows",
+  "version": "1.0.0",
+  "private": true,
+  "packageManager": "pnpm@10.28.1",
+  "scripts": {
+    "build": "esbuild scripts/policy.mjs --bundle --platform=node --format=esm --banner:js=\"/* eslint-disable */\" --outfile=scripts/policy.bundle.mjs && prettier --write scripts/policy.bundle.mjs",
+    "check": "pnpm run lint && pnpm run test && pnpm run actionlint",
+    "lint": "prettier --check .",
+    "lint:fix": "prettier --write .",
+    "test": "node --test",
+    "actionlint": "actionlint"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.1",
+    "jsonc-parser": "^3.3.1",
+    "prettier": "^3.3.0",
+    "yaml": "^2.8.1"
+  }
+}

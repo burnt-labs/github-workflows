@@ -1,0 +1,114 @@
+name: Burnt Cloudflare Version
+
+on:
+  workflow_call:
+    inputs:
+      operation:
+        required: true
+        type: string
+      target:
+        required: true
+        type: string
+      deployment-policy:
+        required: true
+        type: string
+      quality-policy:
+        required: true
+        type: string
+      version-tag:
+        required: true
+        type: string
+      version-message:
+        required: true
+        type: string
+    secrets:
+      cloudflare-account-id:
+        required: true
+      cloudflare-api-token:
+        required: true
+    outputs:
+      version-id:
+        value: ${{ jobs.version.outputs.version-id }}
+      deployment-url:
+        value: ${{ jobs.version.outputs.deployment-url }}
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    name: ${{ inputs.target }} ${{ inputs.operation }}
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ fromJSON(inputs.deployment-policy).targets[inputs.target].githubEnvironment }}
+      url: ${{ steps.metadata.outputs.deployment-url }}
+    permissions:
+      contents: read
+      deployments: write
+    outputs:
+      version-id: ${{ steps.metadata.outputs.version-id }}
+      deployment-url: ${{ steps.metadata.outputs.deployment-url }}
+    defaults:
+      run:
+        working-directory: ${{ fromJSON(inputs.quality-policy).workingDirectory }}
+    steps:
+      - name: Validate invocation
+        if: >-
+          !contains(fromJSON('["preview","deploy"]'), inputs.operation) ||
+          !contains(fromJSON('["candidate","release"]'), inputs.target)
+        run: |
+          echo "::error::Invalid operation or target"
+          exit 1
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+      - name: Enable Corepack
+        run: corepack enable
+      - name: Install
+        run: ${{ fromJSON(inputs.quality-policy).commands.install }}
+      - name: Build
+        run: ${{ fromJSON(inputs.quality-policy).commands.build }}
+      - name: Upload or deploy Worker version
+        id: wrangler
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.cloudflare-api-token }}
+          accountId: ${{ secrets.cloudflare-account-id }}
+          workingDirectory: ${{ fromJSON(inputs.deployment-policy).workingDirectory }}
+          packageManager: ${{ fromJSON(inputs.deployment-policy).packageManager }}
+          command: >-
+            ${{ inputs.operation == 'preview' && 'versions upload' || 'deploy' }}
+            --env ${{ fromJSON(inputs.deployment-policy).targets[inputs.target].wranglerEnv }}
+            --message "${{ inputs.version-message }}"
+            --tag "${{ inputs.version-tag }}"
+      - name: Extract Cloudflare metadata
+        id: metadata
+        env:
+          COMMAND_OUTPUT: ${{ steps.wrangler.outputs.command-output }}
+          ACTION_URL: ${{ steps.wrangler.outputs.deployment-url }}
+          TARGET_URL: ${{ fromJSON(inputs.deployment-policy).targets[inputs.target].url }}
+          OPERATION: ${{ inputs.operation }}
+        run: |
+          VERSION_ID=$(printf '%s' "$COMMAND_OUTPUT" | grep -oE '(Worker )?Version ID: +[a-f0-9-]+' | head -1 | grep -oE '[a-f0-9-]{8,}' || true)
+          PREVIEW_URL=$(printf '%s' "$COMMAND_OUTPUT" | grep -oE 'https://[^[:space:]]+\.workers\.dev[^[:space:]]*' | head -1 || true)
+          if [ "$OPERATION" = "preview" ]; then
+            DEPLOYMENT_URL="${PREVIEW_URL:-$ACTION_URL}"
+          else
+            DEPLOYMENT_URL="${TARGET_URL:-$ACTION_URL}"
+          fi
+          if [ -z "$VERSION_ID" ] || [ -z "$DEPLOYMENT_URL" ]; then
+            echo "::error::Cloudflare output did not contain version metadata"
+            exit 1
+          fi
+          echo "version-id=$VERSION_ID" >> "$GITHUB_OUTPUT"
+          echo "deployment-url=$DEPLOYMENT_URL" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Cloudflare ${{ inputs.target }} ${{ inputs.operation }}"
+            echo "- Tag: \`${{ inputs.version-tag }}\`"
+            echo "- Version: \`$VERSION_ID\`"
+            echo "- URL: $DEPLOYMENT_URL"
+            echo "- Source: ${{ inputs.version-message }}"
+          } >> "$GITHUB_STEP_SUMMARY"
