@@ -23,7 +23,7 @@ permissions:
 
 jobs:
   quality:
-    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@eff35146e19c05447efb38f0cc68e9587a7331c0
+    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@dc8b20de30c0204633d572630078e06459fb89b9
 
   deploy-release:
     needs: quality
