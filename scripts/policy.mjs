@@ -130,7 +130,7 @@ function writeOutput(name, value) {
   fs.appendFileSync(process.env.GITHUB_OUTPUT, `${name}=${value}\n`);
 }
 
-function main() {
+export function runPolicy() {
   const deploymentRequired = process.argv.includes("--deployment");
   const { quality, deployment } = loadPolicies(
     process.env.POLICY_ROOT ?? process.cwd(),
@@ -140,14 +140,5 @@ function main() {
   if (deployment) {
     writeOutput("deployment", JSON.stringify(deployment));
     writeOutput("promotion-mode", deployment.promotionMode);
-  }
-}
-
-if (import.meta.url === `file://${process.argv[1]}`) {
-  try {
-    main();
-  } catch (error) {
-    process.stderr.write(`${error.message}\n`);
-    process.exitCode = 1;
   }
 }
