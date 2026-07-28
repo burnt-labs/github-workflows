@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "workingDirectory": ".",
+  "commands": {
+    "install": "pnpm install --frozen-lockfile",
+    "lint": "pnpm run actionlint",
+    "prettier": "pnpm run lint",
+    "typeCheck": "node --check scripts/policy.mjs && node --check scripts/release-metadata.mjs",
+    "test": "pnpm run test",
+    "coverage": "node --experimental-test-coverage --test-coverage-lines=57 --test-coverage-functions=55 --test-coverage-branches=62 --test",
+    "build": "pnpm run build",
+  },
+  "coverageThresholds": {
+    "lines": 57,
+    "functions": 55,
+    "branches": 62,
+  },
+}
