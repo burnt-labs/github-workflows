@@ -37,7 +37,7 @@ jobs:
           path: .burnt-workflows
       - id: policy
         name: Validate policies
-        run: node .burnt-workflows/scripts/policy.bundle.mjs
+        run: node .burnt-workflows/scripts/policy.bundle.cjs
 
   quality:
     name: Quality

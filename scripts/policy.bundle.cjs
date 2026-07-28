@@ -5,19 +5,8 @@ var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
-var __require = /* @__PURE__ */ ((x) =>
-  typeof require !== "undefined"
-    ? require
-    : typeof Proxy !== "undefined"
-      ? new Proxy(x, {
-          get: (a, b) => (typeof require !== "undefined" ? require : a)[b],
-        })
-      : x)(function (x) {
-  if (typeof require !== "undefined") return require.apply(this, arguments);
-  throw Error('Dynamic require of "' + x + '" is not supported');
-});
 var __commonJS = (cb, mod) =>
-  function __require2() {
+  function __require() {
     try {
       return (
         mod ||
@@ -31,6 +20,10 @@ var __commonJS = (cb, mod) =>
       throw ((mod = 0), e);
     }
   };
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, { get: all[name], enumerable: true });
+};
 var __copyProps = (to, from, except, desc) => {
   if ((from && typeof from === "object") || typeof from === "function") {
     for (let key of __getOwnPropNames(from))
@@ -55,17 +48,19 @@ var __toESM = (mod, isNodeMode, target) => (
     mod,
   )
 );
+var __toCommonJS = (mod) =>
+  __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
 // node_modules/.pnpm/jsonc-parser@3.3.1/node_modules/jsonc-parser/lib/umd/main.js
 var require_main = __commonJS({
   "node_modules/.pnpm/jsonc-parser@3.3.1/node_modules/jsonc-parser/lib/umd/main.js"(
-    exports,
-    module,
+    exports2,
+    module2,
   ) {
     (function (factory) {
-      if (typeof module === "object" && typeof module.exports === "object") {
-        var v = factory(__require, exports);
-        if (v !== void 0) module.exports = v;
+      if (typeof module2 === "object" && typeof module2.exports === "object") {
+        var v = factory(require, exports2);
+        if (v !== void 0) module2.exports = v;
       } else if (typeof define === "function" && define.amd) {
         define([
           "require",
@@ -76,32 +71,32 @@ var require_main = __commonJS({
           "./impl/parser",
         ], factory);
       }
-    })(function (require2, exports2) {
+    })(function (require2, exports3) {
       "use strict";
-      Object.defineProperty(exports2, "__esModule", { value: true });
-      exports2.applyEdits =
-        exports2.modify =
-        exports2.format =
-        exports2.printParseErrorCode =
-        exports2.ParseErrorCode =
-        exports2.stripComments =
-        exports2.visit =
-        exports2.getNodeValue =
-        exports2.getNodePath =
-        exports2.findNodeAtOffset =
-        exports2.findNodeAtLocation =
-        exports2.parseTree =
-        exports2.parse =
-        exports2.getLocation =
-        exports2.SyntaxKind =
-        exports2.ScanError =
-        exports2.createScanner =
+      Object.defineProperty(exports3, "__esModule", { value: true });
+      exports3.applyEdits =
+        exports3.modify =
+        exports3.format =
+        exports3.printParseErrorCode =
+        exports3.ParseErrorCode =
+        exports3.stripComments =
+        exports3.visit =
+        exports3.getNodeValue =
+        exports3.getNodePath =
+        exports3.findNodeAtOffset =
+        exports3.findNodeAtLocation =
+        exports3.parseTree =
+        exports3.parse =
+        exports3.getLocation =
+        exports3.SyntaxKind =
+        exports3.ScanError =
+        exports3.createScanner =
           void 0;
       const formatter = require2("./impl/format");
       const edit = require2("./impl/edit");
       const scanner = require2("./impl/scanner");
       const parser = require2("./impl/parser");
-      exports2.createScanner = scanner.createScanner;
+      exports3.createScanner = scanner.createScanner;
       var ScanError;
       (function (ScanError2) {
         ScanError2[(ScanError2["None"] = 0)] = "None";
@@ -115,7 +110,7 @@ var require_main = __commonJS({
         ScanError2[(ScanError2["InvalidEscapeCharacter"] = 5)] =
           "InvalidEscapeCharacter";
         ScanError2[(ScanError2["InvalidCharacter"] = 6)] = "InvalidCharacter";
-      })(ScanError || (exports2.ScanError = ScanError = {}));
+      })(ScanError || (exports3.ScanError = ScanError = {}));
       var SyntaxKind;
       (function (SyntaxKind2) {
         SyntaxKind2[(SyntaxKind2["OpenBraceToken"] = 1)] = "OpenBraceToken";
@@ -138,16 +133,16 @@ var require_main = __commonJS({
         SyntaxKind2[(SyntaxKind2["Trivia"] = 15)] = "Trivia";
         SyntaxKind2[(SyntaxKind2["Unknown"] = 16)] = "Unknown";
         SyntaxKind2[(SyntaxKind2["EOF"] = 17)] = "EOF";
-      })(SyntaxKind || (exports2.SyntaxKind = SyntaxKind = {}));
-      exports2.getLocation = parser.getLocation;
-      exports2.parse = parser.parse;
-      exports2.parseTree = parser.parseTree;
-      exports2.findNodeAtLocation = parser.findNodeAtLocation;
-      exports2.findNodeAtOffset = parser.findNodeAtOffset;
-      exports2.getNodePath = parser.getNodePath;
-      exports2.getNodeValue = parser.getNodeValue;
-      exports2.visit = parser.visit;
-      exports2.stripComments = parser.stripComments;
+      })(SyntaxKind || (exports3.SyntaxKind = SyntaxKind = {}));
+      exports3.getLocation = parser.getLocation;
+      exports3.parse = parser.parse;
+      exports3.parseTree = parser.parseTree;
+      exports3.findNodeAtLocation = parser.findNodeAtLocation;
+      exports3.findNodeAtOffset = parser.findNodeAtOffset;
+      exports3.getNodePath = parser.getNodePath;
+      exports3.getNodeValue = parser.getNodeValue;
+      exports3.visit = parser.visit;
+      exports3.stripComments = parser.stripComments;
       var ParseErrorCode;
       (function (ParseErrorCode2) {
         ParseErrorCode2[(ParseErrorCode2["InvalidSymbol"] = 1)] =
@@ -182,7 +177,7 @@ var require_main = __commonJS({
           "InvalidEscapeCharacter";
         ParseErrorCode2[(ParseErrorCode2["InvalidCharacter"] = 16)] =
           "InvalidCharacter";
-      })(ParseErrorCode || (exports2.ParseErrorCode = ParseErrorCode = {}));
+      })(ParseErrorCode || (exports3.ParseErrorCode = ParseErrorCode = {}));
       function printParseErrorCode2(code) {
         switch (code) {
           case 1:
@@ -220,15 +215,15 @@ var require_main = __commonJS({
         }
         return "<unknown ParseErrorCode>";
       }
-      exports2.printParseErrorCode = printParseErrorCode2;
+      exports3.printParseErrorCode = printParseErrorCode2;
       function format(documentText, range, options) {
         return formatter.format(documentText, range, options);
       }
-      exports2.format = format;
+      exports3.format = format;
       function modify(text, path2, value, options) {
         return edit.setProperty(text, path2, value, options);
       }
-      exports2.modify = modify;
+      exports3.modify = modify;
       function applyEdits(text, edits) {
         let sortedEdits = edits.slice(0).sort((a, b) => {
           const diff = a.offset - b.offset;
@@ -249,16 +244,25 @@ var require_main = __commonJS({
         }
         return text;
       }
-      exports2.applyEdits = applyEdits;
+      exports3.applyEdits = applyEdits;
     });
   },
 });
 
 // scripts/policy.mjs
+var policy_exports = {};
+__export(policy_exports, {
+  loadPolicies: () => loadPolicies,
+  parseJsonc: () => parseJsonc,
+  validateDeploymentPolicy: () => validateDeploymentPolicy,
+  validateQualityPolicy: () => validateQualityPolicy,
+});
+module.exports = __toCommonJS(policy_exports);
+var import_node_fs = __toESM(require("node:fs"), 1);
+var import_node_path = __toESM(require("node:path"), 1);
+var import_node_process = __toESM(require("node:process"), 1);
 var import_jsonc_parser = __toESM(require_main(), 1);
-import fs from "node:fs";
-import path from "node:path";
-import process from "node:process";
+var import_meta = {};
 var QUALITY_PATH = ".github/quality-policy.jsonc";
 var DEPLOYMENT_PATH = ".github/deployment-policy.jsonc";
 var REQUIRED_COMMANDS = [
@@ -361,34 +365,45 @@ function validateDeploymentPolicy(policy) {
   }
   return policy;
 }
-function loadPolicies(root = process.cwd(), deploymentRequired = false) {
-  const qualityFile = path.join(root, QUALITY_PATH);
+function loadPolicies(
+  root = import_node_process.default.cwd(),
+  deploymentRequired = false,
+) {
+  const qualityFile = import_node_path.default.join(root, QUALITY_PATH);
   const quality = validateQualityPolicy(
-    parseJsonc(fs.readFileSync(qualityFile, "utf8"), qualityFile),
+    parseJsonc(
+      import_node_fs.default.readFileSync(qualityFile, "utf8"),
+      qualityFile,
+    ),
   );
   let deployment;
-  const deploymentFile = path.join(root, DEPLOYMENT_PATH);
-  if (deploymentRequired || fs.existsSync(deploymentFile)) {
+  const deploymentFile = import_node_path.default.join(root, DEPLOYMENT_PATH);
+  if (deploymentRequired || import_node_fs.default.existsSync(deploymentFile)) {
     deployment = validateDeploymentPolicy(
-      parseJsonc(fs.readFileSync(deploymentFile, "utf8"), deploymentFile),
+      parseJsonc(
+        import_node_fs.default.readFileSync(deploymentFile, "utf8"),
+        deploymentFile,
+      ),
     );
   }
   return { quality, deployment };
 }
 function writeOutput(name, value) {
-  if (!process.env.GITHUB_OUTPUT) {
+  if (!import_node_process.default.env.GITHUB_OUTPUT) {
     throw new Error("GITHUB_OUTPUT is required");
   }
-  fs.appendFileSync(
-    process.env.GITHUB_OUTPUT,
+  import_node_fs.default.appendFileSync(
+    import_node_process.default.env.GITHUB_OUTPUT,
     `${name}=${value}
 `,
   );
 }
 function main() {
-  const deploymentRequired = process.argv.includes("--deployment");
+  const deploymentRequired =
+    import_node_process.default.argv.includes("--deployment");
   const { quality, deployment } = loadPolicies(
-    process.env.POLICY_ROOT ?? process.cwd(),
+    import_node_process.default.env.POLICY_ROOT ??
+      import_node_process.default.cwd(),
     deploymentRequired,
   );
   writeOutput("quality", JSON.stringify(quality));
@@ -397,18 +412,20 @@ function main() {
     writeOutput("promotion-mode", deployment.promotionMode);
   }
 }
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import_meta.url === `file://${import_node_process.default.argv[1]}`) {
   try {
     main();
   } catch (error) {
-    process.stderr.write(`${error.message}
+    import_node_process.default.stderr.write(`${error.message}
 `);
-    process.exitCode = 1;
+    import_node_process.default.exitCode = 1;
   }
 }
-export {
-  loadPolicies,
-  parseJsonc,
-  validateDeploymentPolicy,
-  validateQualityPolicy,
-};
+// Annotate the CommonJS export names for ESM import in node:
+0 &&
+  (module.exports = {
+    loadPolicies,
+    parseJsonc,
+    validateDeploymentPolicy,
+    validateQualityPolicy,
+  });
