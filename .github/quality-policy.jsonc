@@ -3,7 +3,7 @@
   "workingDirectory": ".",
   "commands": {
     "install": "pnpm install --frozen-lockfile && go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7",
-    "lint": "pnpm run actionlint",
+    "lint": "$(go env GOPATH)/bin/actionlint",
     "prettier": "pnpm run lint",
     "typeCheck": "node --check scripts/policy.mjs && node --check scripts/release-metadata.mjs",
     "test": "pnpm run test",
