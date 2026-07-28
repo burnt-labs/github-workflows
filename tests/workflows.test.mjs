@@ -13,6 +13,8 @@ test("workflows parse and never create commits", () => {
     assert.ok(workflow.on, name);
     assert.ok(workflow.jobs, name);
     assert.doesNotMatch(source, /\bgit (commit|push)\b/, name);
+    assert.doesNotMatch(source, /burnt-labs\/github-workflows\/.+@main/, name);
+    assert.doesNotMatch(source, /ref: main/, name);
   }
 });
 

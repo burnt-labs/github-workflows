@@ -23,14 +23,14 @@ permissions:
 
 jobs:
   quality:
-    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@main
+    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@eff35146e19c05447efb38f0cc68e9587a7331c0
 
   deploy-release:
     needs: quality
     if: >-
       inputs.prerelease == false &&
       needs.quality.outputs.promotion-mode == 'manual'
-    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@main
+    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@eff35146e19c05447efb38f0cc68e9587a7331c0
     with:
       operation: deploy
       target: release

@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   quality:
-    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@main
+    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@eff35146e19c05447efb38f0cc68e9587a7331c0
 
   metadata:
     needs: quality
@@ -28,7 +28,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: burnt-labs/github-workflows
-          ref: main
+          ref: eff35146e19c05447efb38f0cc68e9587a7331c0
           path: .burnt-workflows
       - name: Read stable release tags
         env:
@@ -54,7 +54,7 @@ jobs:
 
   deploy-candidate:
     needs: [quality, metadata]
-    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@main
+    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@eff35146e19c05447efb38f0cc68e9587a7331c0
     with:
       operation: deploy
       target: candidate
@@ -68,7 +68,7 @@ jobs:
 
   preview-release:
     needs: [quality, metadata, deploy-candidate]
-    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@main
+    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@eff35146e19c05447efb38f0cc68e9587a7331c0
     with:
       operation: preview
       target: release
@@ -139,7 +139,7 @@ jobs:
   deploy-release-automatic:
     needs: [quality, metadata, create-releases]
     if: needs.quality.outputs.promotion-mode == 'automatic'
-    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@main
+    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@eff35146e19c05447efb38f0cc68e9587a7331c0
     with:
       operation: deploy
       target: release
