@@ -20,6 +20,11 @@ function qualityPolicy() {
       coverage: "pnpm coverage",
       build: "pnpm build",
     },
+    coverageThresholds: {
+      lines: 80,
+      functions: 75,
+      branches: 70,
+    },
   };
 }
 
@@ -70,6 +75,26 @@ test("quality requires every independent gate", () => {
       new RegExp(`commands\\.${command}`),
     );
   }
+});
+
+test("quality requires repository-owned coverage thresholds", () => {
+  for (const metric of ["lines", "functions", "branches"]) {
+    for (const threshold of [-1, 50.5, 101, "80"]) {
+      const policy = qualityPolicy();
+      policy.coverageThresholds[metric] = threshold;
+      assert.throws(
+        () => validateQualityPolicy(policy),
+        new RegExp(`coverageThresholds\\.${metric}`),
+      );
+    }
+  }
+
+  const missing = qualityPolicy();
+  delete missing.coverageThresholds;
+  assert.throws(
+    () => validateQualityPolicy(missing),
+    /coverageThresholds must be an object/,
+  );
 });
 
 test("deployment accepts only exact topology environments", () => {

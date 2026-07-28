@@ -15,6 +15,7 @@ const REQUIRED_COMMANDS = [
   "coverage",
   "build",
 ];
+const REQUIRED_COVERAGE_THRESHOLDS = ["lines", "functions", "branches"];
 const TOPOLOGIES = {
   standard: { candidate: "staging", release: "production" },
   chain: { candidate: "testnet", release: "mainnet" },
@@ -57,6 +58,21 @@ export function validateQualityPolicy(policy) {
   }
   for (const command of REQUIRED_COMMANDS) {
     requireString(policy.commands[command], `quality commands.${command}`);
+  }
+  if (
+    !policy.coverageThresholds ||
+    typeof policy.coverageThresholds !== "object" ||
+    Array.isArray(policy.coverageThresholds)
+  ) {
+    throw new Error("quality coverageThresholds must be an object");
+  }
+  for (const metric of REQUIRED_COVERAGE_THRESHOLDS) {
+    const threshold = policy.coverageThresholds[metric];
+    if (!Number.isInteger(threshold) || threshold < 0 || threshold > 100) {
+      throw new Error(
+        `quality coverageThresholds.${metric} must be an integer from 0 to 100`,
+      );
+    }
   }
   return policy;
 }

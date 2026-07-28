@@ -11,7 +11,32 @@ Consumers define:
 - `.github/npm-policy.jsonc` for npm packages
 
 Quality policy commands are mandatory and independently run: install, lint,
-Prettier, type-check, tests, coverage, and build.
+Prettier, type-check, tests, coverage, and build. Each repository also owns
+integer `coverageThresholds` for `lines`, `functions`, and `branches` from 0 to 100. The repository's coverage command must enforce those declared values;
+the central workflow does not impose a universal percentage.
+
+Example quality policy:
+
+```jsonc
+{
+  "schemaVersion": 1,
+  "workingDirectory": ".",
+  "commands": {
+    "install": "pnpm install --frozen-lockfile",
+    "lint": "pnpm lint",
+    "prettier": "pnpm prettier",
+    "typeCheck": "pnpm type-check",
+    "test": "pnpm test",
+    "coverage": "pnpm test:coverage",
+    "build": "pnpm build",
+  },
+  "coverageThresholds": {
+    "lines": 80,
+    "functions": 80,
+    "branches": 80,
+  },
+}
+```
 
 Deployment policy uses semantic `candidate` and `release` roles:
 
