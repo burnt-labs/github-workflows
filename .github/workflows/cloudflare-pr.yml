@@ -32,6 +32,9 @@ jobs:
 
   preview-candidate:
     needs: [quality, metadata]
+    permissions:
+      contents: read
+      deployments: write
     uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@eff35146e19c05447efb38f0cc68e9587a7331c0
     with:
       operation: preview
