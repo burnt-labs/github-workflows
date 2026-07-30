@@ -2,6 +2,10 @@
 
 Central organization-required and reusable GitHub Actions workflows.
 
+[AGENTS.md](./AGENTS.md) is the full reference: every workflow's contract, the
+complete policy schemas, copy-pasteable caller templates, and the failure modes
+worth knowing before changing anything here.
+
 ## Repository Policies
 
 Consumers define:
