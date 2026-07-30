@@ -1,4 +1,4 @@
-name: Burnt Cloudflare Published Release
+name: Burnt Cloudflare Release
 
 on:
   workflow_call:
@@ -12,6 +12,14 @@ on:
       prerelease:
         required: true
         type: boolean
+      operation:
+        description: >-
+          preview uploads the release target at 0% traffic without serving it;
+          deploy serves it. Callers that validate a release before publishing
+          pass preview on release:created and deploy on release:published.
+        required: false
+        default: deploy
+        type: string
     secrets:
       cloudflare-account-id:
         required: true
@@ -22,12 +30,43 @@ permissions:
   contents: read
 
 jobs:
+  # Without this, an unrecognized operation skips both preview-release and
+  # deploy-release and the run reports success having done nothing.
+  validate:
+    name: Validate invocation
+    runs-on: ubuntu-latest
+    steps:
+      - if: ${{ !contains(fromJSON('["preview","deploy"]'), inputs.operation) }}
+        run: |
+          echo "::error::operation must be preview or deploy"
+          exit 1
+
   quality:
-    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@17d264b2bd08c43952eabc886203e09fa304e794
+    needs: validate
+    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@3b98d942aaa8aab198889980c570cf2408f4ed84
+
+  preview-release:
+    needs: quality
+    if: inputs.operation == 'preview'
+    permissions:
+      contents: read
+      deployments: write
+    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@eff35146e19c05447efb38f0cc68e9587a7331c0
+    with:
+      operation: preview
+      target: release
+      quality-policy: ${{ needs.quality.outputs.quality-policy }}
+      deployment-policy: ${{ needs.quality.outputs.deployment-policy }}
+      version-tag: ${{ inputs.release-tag }}
+      version-message: Release preview ${{ inputs.release-url }}
+    secrets:
+      cloudflare-account-id: ${{ secrets.cloudflare-account-id }}
+      cloudflare-api-token: ${{ secrets.cloudflare-api-token }}
 
   deploy-release:
     needs: quality
     if: >-
+      inputs.operation == 'deploy' &&
       inputs.prerelease == false &&
       needs.quality.outputs.promotion-mode == 'manual'
     permissions:

@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   quality:
-    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@17d264b2bd08c43952eabc886203e09fa304e794
+    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@3b98d942aaa8aab198889980c570cf2408f4ed84
 
   metadata:
     needs: quality
@@ -71,6 +71,7 @@ jobs:
 
   preview-release:
     needs: [quality, metadata, deploy-candidate]
+    if: fromJSON(needs.quality.outputs.deployment-policy).previewReleaseOnMain
     permissions:
       contents: read
       deployments: write
@@ -88,6 +89,13 @@ jobs:
 
   create-releases:
     needs: [quality, metadata, deploy-candidate, preview-release]
+    # preview-release is skipped when previewReleaseOnMain is false, and a
+    # skipped need would otherwise skip this job too.
+    if: >-
+      !cancelled() &&
+      needs.deploy-candidate.result == 'success' &&
+      (needs.preview-release.result == 'success' ||
+       needs.preview-release.result == 'skipped')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -104,15 +112,17 @@ jobs:
           RELEASE_PREVIEW_URL: ${{ needs.preview-release.outputs.deployment-url }}
           RELEASE_PREVIEW_VERSION: ${{ needs.preview-release.outputs.version-id }}
         run: |
-          cat > "$RUNNER_TEMP/notes.md" <<EOF
-          ## Release candidate
-
-          - Candidate deployment: $CANDIDATE_URL
-          - Candidate Cloudflare version: \`$CANDIDATE_VERSION\`
-          - Release preview: $RELEASE_PREVIEW_URL
-          - Release-preview Cloudflare version: \`$RELEASE_PREVIEW_VERSION\`
-          - Commit: \`${{ github.sha }}\`
-          EOF
+          {
+            echo "## Release candidate"
+            echo
+            echo "- Candidate deployment: $CANDIDATE_URL"
+            echo "- Candidate Cloudflare version: \`$CANDIDATE_VERSION\`"
+            if [ -n "$RELEASE_PREVIEW_URL" ]; then
+              echo "- Release preview: $RELEASE_PREVIEW_URL"
+              echo "- Release-preview Cloudflare version: \`$RELEASE_PREVIEW_VERSION\`"
+            fi
+            echo "- Commit: \`${{ github.sha }}\`"
+          } > "$RUNNER_TEMP/notes.md"
           if gh release view "$CANDIDATE_TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
             gh release edit "$CANDIDATE_TAG" \
               --repo "${{ github.repository }}" \

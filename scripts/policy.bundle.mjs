@@ -1064,6 +1064,9 @@ function validateQualityPolicy(policy) {
   for (const command of REQUIRED_COMMANDS) {
     requireString(policy.commands[command], `quality commands.${command}`);
   }
+  if (policy.commands.validate !== void 0) {
+    requireString(policy.commands.validate, "quality commands.validate");
+  }
   if (
     !policy.coverageThresholds ||
     typeof policy.coverageThresholds !== "object" ||
@@ -1099,6 +1102,11 @@ function validateDeploymentPolicy(policy) {
   }
   requireString(policy.workingDirectory, "deployment workingDirectory");
   requireString(policy.versionFile, "deployment versionFile");
+  if (policy.previewReleaseOnMain === void 0) {
+    policy.previewReleaseOnMain = true;
+  } else if (typeof policy.previewReleaseOnMain !== "boolean") {
+    throw new Error("deployment previewReleaseOnMain must be a boolean");
+  }
   const expected = TOPOLOGIES[policy.topology];
   for (const role of ["candidate", "release"]) {
     const target = policy.targets?.[role];

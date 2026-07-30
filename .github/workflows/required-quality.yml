@@ -41,7 +41,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: burnt-labs/github-workflows
-          ref: 17d264b2bd08c43952eabc886203e09fa304e794
+          ref: 3b98d942aaa8aab198889980c570cf2408f4ed84
           path: .burnt-workflows
       - id: policy
         name: Validate policies
@@ -77,3 +77,6 @@ jobs:
         run: ${{ fromJSON(needs.policy.outputs.quality).commands.coverage }}
       - name: Build
         run: ${{ fromJSON(needs.policy.outputs.quality).commands.build }}
+      - name: Validate
+        if: fromJSON(needs.policy.outputs.quality).commands.validate != ''
+        run: ${{ fromJSON(needs.policy.outputs.quality).commands.validate }}

@@ -70,6 +70,36 @@ test("Cloudflare promotion ordering is explicit", () => {
   );
 });
 
+test("main release preview is policy-gated and skip-safe", () => {
+  const source = fs.readFileSync(`${directory}/cloudflare-main.yml`, "utf8");
+  const workflow = parse(source);
+  assert.equal(
+    workflow.jobs["preview-release"].if,
+    "fromJSON(needs.quality.outputs.deployment-policy).previewReleaseOnMain",
+  );
+  // A skipped need skips its dependents by default, so disabling the preview
+  // would otherwise stop releases from being created at all.
+  const createReleases = workflow.jobs["create-releases"].if;
+  assert.match(createReleases, /!cancelled\(\)/);
+  assert.match(createReleases, /needs\.preview-release\.result == 'skipped'/);
+});
+
+test("release rejects an unrecognized operation instead of skipping", () => {
+  const source = fs.readFileSync(`${directory}/cloudflare-release.yml`, "utf8");
+  const workflow = parse(source);
+  assert.match(source, /operation must be preview or deploy/);
+  assert.equal(
+    workflow.jobs["preview-release"].if,
+    "inputs.operation == 'preview'",
+  );
+  assert.match(
+    workflow.jobs["deploy-release"].if,
+    /inputs\.operation == 'deploy'/,
+  );
+  // Every deploying job must sit downstream of the guard.
+  assert.deepEqual(workflow.jobs.quality.needs, "validate");
+});
+
 test("release candidates cannot deploy the release target", () => {
   const source = fs.readFileSync(`${directory}/cloudflare-release.yml`, "utf8");
   assert.match(source, /inputs\.prerelease == false/);

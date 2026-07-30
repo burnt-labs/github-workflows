@@ -59,6 +59,9 @@ export function validateQualityPolicy(policy) {
   for (const command of REQUIRED_COMMANDS) {
     requireString(policy.commands[command], `quality commands.${command}`);
   }
+  if (policy.commands.validate !== undefined) {
+    requireString(policy.commands.validate, "quality commands.validate");
+  }
   if (
     !policy.coverageThresholds ||
     typeof policy.coverageThresholds !== "object" ||
@@ -95,6 +98,16 @@ export function validateDeploymentPolicy(policy) {
   }
   requireString(policy.workingDirectory, "deployment workingDirectory");
   requireString(policy.versionFile, "deployment versionFile");
+
+  // Normalized rather than read as an optional key, because a missing key
+  // reaches workflow `if:` conditions as null, and GitHub casts both null and
+  // false to 0 when comparing across types. Emitting an explicit boolean keeps
+  // the condition unambiguous.
+  if (policy.previewReleaseOnMain === undefined) {
+    policy.previewReleaseOnMain = true;
+  } else if (typeof policy.previewReleaseOnMain !== "boolean") {
+    throw new Error("deployment previewReleaseOnMain must be a boolean");
+  }
 
   const expected = TOPOLOGIES[policy.topology];
   for (const role of ["candidate", "release"]) {
