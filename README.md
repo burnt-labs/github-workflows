@@ -84,7 +84,24 @@ Use `.github/workflows/required-quality.yml` as an organization ruleset required
 workflow. It supports `pull_request` and `merge_group` without path filters.
 
 Repository deployment trigger files call the reusable workflows from this
-repository. Pin callers to a full commit SHA.
+repository. Pin callers to a full commit SHA **with a trailing version comment**
+naming the release that SHA belongs to:
+
+```yaml
+uses: burnt-labs/github-workflows/.github/workflows/cloudflare-pr.yml@921f1f27… # v1.0.0
+```
+
+The comment is not decoration. Dependabot resolves the version from it and
+opens bump pull requests; without it, and without releases here, a caller's pin
+never moves. That is not hypothetical — before `v1.0.0` this repository had no
+tags, so consumers silently kept resolving pre-pinning snapshots: a floating
+`cloudflare/wrangler-action` in the job holding `cloudflare-api-token`, and
+Node 20 actions months after these workflows had moved to Node 24. The
+`actions/*` pins inside the workflows advanced automatically the whole time,
+because those publish releases and this repository did not.
+
+**Cut a release for any change consumers should pick up.** A merge to `main` no
+consumer can resolve a version for is a change that will not reach them.
 
 Every `uses:` reference inside this repository is itself pinned to a full commit
 SHA with a trailing version comment, so a compromised upstream tag cannot reach

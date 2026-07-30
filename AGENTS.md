@@ -18,6 +18,9 @@ These are not preferences. Changes that break them will be rejected.
   quality gates.
 - Pin every `uses:` reference to a full commit SHA with a trailing version
   comment. Dependabot advances the pins.
+- Cut a release for any change consumers should pick up. Consumers pin by SHA
+  and Dependabot resolves the version from the trailing comment, so an
+  unreleased change on `main` cannot reach them.
 - Store repository-specific configuration in JSONC policy files.
 - Open pull requests as drafts.
 
@@ -306,6 +309,18 @@ scripts. Editing a workflow or a script means every reference to it must move to
 the new commit, including that `ref:`. A stale pin does not error — it silently
 runs the old version. Commit the pin advance separately so it is reviewable, and
 bump again to the merge commit afterwards.
+
+This has bitten twice, both times silently, and both times the symptom appeared
+in a consumer rather than here: a caller pinned before the SHA-pinning work kept
+resolving a floating `cloudflare/wrangler-action` in the job holding
+`cloudflare-api-token`, and a caller pinned before a Dependabot bump kept
+resolving Node 20 actions. Green runs throughout. When you touch a pin, check
+what the _old_ SHA actually resolved to rather than assuming it was equivalent.
+
+**Then cut a release.** Consumers pin by SHA with a version comment, and
+Dependabot resolves the version from the release list. Merging to `main` without
+tagging leaves consumers on the previous SHA indefinitely, which is how both
+failures above persisted.
 
 Encode new invariants as tests in `tests/`. The existing tests assert things
 like "no workflow creates commits" and "every action is SHA-pinned" precisely
