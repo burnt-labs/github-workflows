@@ -41,7 +41,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: burnt-labs/github-workflows
-          ref: 3b98d942aaa8aab198889980c570cf2408f4ed84
+          ref: d0a91f43145926ec7fb3253bf8ef6f01d5033a24
           path: .burnt-workflows
       - id: policy
         name: Validate policies
