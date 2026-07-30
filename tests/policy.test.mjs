@@ -99,11 +99,46 @@ test("quality requires repository-owned coverage thresholds", () => {
 
 test("deployment accepts only exact topology environments", () => {
   for (const topology of ["standard", "chain"]) {
-    assert.deepEqual(
-      validateDeploymentPolicy(deploymentPolicy(topology)),
-      deploymentPolicy(topology),
+    assert.deepEqual(validateDeploymentPolicy(deploymentPolicy(topology)), {
+      ...deploymentPolicy(topology),
+      previewReleaseOnMain: true,
+    });
+  }
+});
+
+test("deployment normalizes previewReleaseOnMain to an explicit boolean", () => {
+  // Workflow `if:` conditions read this directly, and GitHub casts a missing
+  // key (null) and false to the same value, so the default must be explicit.
+  assert.equal(
+    validateDeploymentPolicy(deploymentPolicy()).previewReleaseOnMain,
+    true,
+  );
+
+  const disabled = deploymentPolicy();
+  disabled.previewReleaseOnMain = false;
+  assert.equal(validateDeploymentPolicy(disabled).previewReleaseOnMain, false);
+
+  for (const invalid of ["false", 0, null]) {
+    const policy = deploymentPolicy();
+    policy.previewReleaseOnMain = invalid;
+    assert.throws(
+      () => validateDeploymentPolicy(policy),
+      /previewReleaseOnMain must be a boolean/,
     );
   }
+});
+
+test("quality accepts an optional validate command", () => {
+  const withValidate = qualityPolicy();
+  withValidate.commands.validate = "pnpm validate:deps";
+  assert.equal(
+    validateQualityPolicy(withValidate).commands.validate,
+    "pnpm validate:deps",
+  );
+
+  const empty = qualityPolicy();
+  empty.commands.validate = "";
+  assert.throws(() => validateQualityPolicy(empty), /commands\.validate/);
 });
 
 test("deployment rejects preview-specific environments", () => {

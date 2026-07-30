@@ -38,6 +38,11 @@ Example quality policy:
 }
 ```
 
+`commands.validate` is the one optional command. It runs last, after build, and
+exists for repository-specific gates that do not fit the seven standard ones —
+dependency compatibility matrices, generated-artifact drift, schema checks. Omit
+the key and the step is skipped.
+
 Deployment policy uses semantic `candidate` and `release` roles:
 
 | Topology   | Candidate | Release      |
@@ -47,6 +52,27 @@ Deployment policy uses semantic `candidate` and `release` roles:
 
 Preview deployments use the actual target environment. `preview` and
 `preview-*` GitHub Environments are invalid.
+
+### When the release target is previewed
+
+By default every push to main uploads a release-target preview at 0% traffic, so
+the release build is exercised before it is cut. Repositories that would rather
+not touch the release environment on ordinary merges set:
+
+```jsonc
+{
+  "previewReleaseOnMain": false,
+}
+```
+
+Those repositories can validate at release time instead by passing `operation`
+to `cloudflare-release.yml` — `preview` on `release: created`, `deploy` on
+`release: published`. `operation` defaults to `deploy`, and an unrecognized
+value fails the run rather than silently skipping every job.
+
+Note that a preview inherits the target environment's secrets and bindings and,
+where `preview_urls` is enabled, is reachable at a public URL. Previewing the
+release target on main is therefore a deliberate choice, not a neutral default.
 
 ## Enforcement
 
