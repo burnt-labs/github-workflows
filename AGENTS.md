@@ -7,5 +7,7 @@
 - Candidate and release are semantic roles, mapped by repository policy.
 - Require lint, Prettier, type-check, tests, coverage, and build as independent
   quality gates.
+- Pin every `uses:` reference to a full commit SHA with a trailing version
+  comment. Dependabot advances the pins.
 - Store repository-specific configuration in JSONC policy files.
 - Open pull requests as drafts.

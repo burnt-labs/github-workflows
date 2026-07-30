@@ -56,6 +56,11 @@ workflow. It supports `pull_request` and `merge_group` without path filters.
 Repository deployment trigger files call the reusable workflows from this
 repository. Pin callers to a full commit SHA.
 
+Every `uses:` reference inside this repository is itself pinned to a full commit
+SHA with a trailing version comment, so a compromised upstream tag cannot reach
+the jobs that hold deployment credentials. Dependabot advances the pins weekly
+and a test rejects any reference that is not a 40-character SHA.
+
 Workflows in this repository never create commits or push branches.
 
 ## npm
