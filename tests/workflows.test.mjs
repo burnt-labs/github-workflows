@@ -18,6 +18,16 @@ test("workflows parse and never create commits", () => {
   }
 });
 
+test("every action reference is pinned to a full commit SHA", () => {
+  for (const name of fs.readdirSync(directory)) {
+    if (!name.endsWith(".yml")) continue;
+    const source = fs.readFileSync(`${directory}/${name}`, "utf8");
+    for (const [, reference] of source.matchAll(/^\s*(?:- )?uses: (\S+)/gm)) {
+      assert.match(reference, /@[0-9a-f]{40}$/, `${name}: ${reference}`);
+    }
+  }
+});
+
 test("required quality supports ruleset events without filters", () => {
   const source = fs.readFileSync(`${directory}/required-quality.yml`, "utf8");
   const workflow = parse(source);
