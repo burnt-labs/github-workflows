@@ -43,7 +43,7 @@ jobs:
 
   quality:
     needs: validate
-    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@17d264b2bd08c43952eabc886203e09fa304e794
+    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@3b98d942aaa8aab198889980c570cf2408f4ed84
 
   preview-release:
     needs: quality
