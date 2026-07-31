@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   quality:
-    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@77500b27ddeb8d45c6bedcf56369bc8156f3a5a7
+    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@dc3c150483da96152a16d569ad735754033933cb
 
   metadata:
     needs: quality
@@ -26,7 +26,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: burnt-labs/github-workflows
-          ref: 77500b27ddeb8d45c6bedcf56369bc8156f3a5a7
+          ref: dc3c150483da96152a16d569ad735754033933cb
           path: .burnt-workflows
       - name: Read stable release tags
         env:
@@ -55,7 +55,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: burnt-labs/github-workflows/.github/workflows/npm-publish.yml@77500b27ddeb8d45c6bedcf56369bc8156f3a5a7
+    uses: burnt-labs/github-workflows/.github/workflows/npm-publish.yml@dc3c150483da96152a16d569ad735754033933cb
     with:
       quality-policy: ${{ needs.quality.outputs.quality-policy }}
       npm-policy: ${{ needs.quality.outputs.npm-policy }}
@@ -116,7 +116,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: burnt-labs/github-workflows/.github/workflows/npm-publish.yml@77500b27ddeb8d45c6bedcf56369bc8156f3a5a7
+    uses: burnt-labs/github-workflows/.github/workflows/npm-publish.yml@dc3c150483da96152a16d569ad735754033933cb
     with:
       quality-policy: ${{ needs.quality.outputs.quality-policy }}
       npm-policy: ${{ needs.quality.outputs.npm-policy }}
