@@ -19,7 +19,7 @@ jobs:
     if: >-
       github.event_name != 'pull_request' ||
       (github.event.pull_request.draft == false &&
-       github.event.pull_request.head.repo.fork == false)
+       github.event.pull_request.head.repo.full_name == github.repository)
     uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@8ad57077de69850b11de82d286ae0cbb23f51aa5
 
   metadata:
