@@ -28,6 +28,18 @@ test("every action reference is pinned to a full commit SHA", () => {
   }
 });
 
+test("every internal workflow pin carries release metadata", () => {
+  for (const name of fs.readdirSync(directory)) {
+    if (!name.endsWith(".yml")) continue;
+    const source = fs.readFileSync(`${directory}/${name}`, "utf8");
+    for (const [line] of source.matchAll(
+      /^\s*(?:- )?uses: burnt-labs\/github-workflows\/.*$/gm,
+    )) {
+      assert.match(line, /@[0-9a-f]{40} # v\d+\.\d+\.\d+$/, `${name}: ${line}`);
+    }
+  }
+});
+
 test("required quality supports ruleset events without filters", () => {
   const source = fs.readFileSync(`${directory}/required-quality.yml`, "utf8");
   const workflow = parse(source);
@@ -67,6 +79,15 @@ test("Phala deploys to the caller's selected real environment", () => {
   assert.match(source, /target must be candidate or release/);
 });
 
+test("Phala requires policy before running consumer quality", () => {
+  const workflow = parse(
+    fs.readFileSync(`${directory}/phala-deploy.yml`, "utf8"),
+  );
+  assert.match(workflow.jobs.policy.steps.at(-1).run, /--phala/);
+  assert.equal(workflow.jobs.quality.needs, "policy");
+  assert.deepEqual(workflow.jobs.deploy.needs, ["policy", "quality"]);
+});
+
 test("Phala uses pinned build actions and a pinned CLI", () => {
   const source = fs.readFileSync(`${directory}/phala-deploy.yml`, "utf8");
   assert.match(source, /docker\/build-push-action@[0-9a-f]{40}/);
@@ -77,11 +98,11 @@ test("Phala uses pinned build actions and a pinned CLI", () => {
 
 test("Phala seals only policy-allowlisted runtime configuration", () => {
   const source = fs.readFileSync(`${directory}/phala-deploy.yml`, "utf8");
-  assert.match(source, /environmentSecrets/);
-  assert.match(source, /environmentVariables/);
-  assert.match(source, /Declared Phala environment values not set/);
-  assert.match(source, /environment-json is not valid JSON/);
-  assert.doesNotMatch(source, /toJSON\(secrets\)/);
+  assert.match(source, /runtimeSecrets/);
+  assert.match(source, /runtimeVariables/);
+  assert.match(source, /Declared Phala configuration not set/);
+  assert.match(source, /toJSON\(secrets\)/);
+  assert.doesNotMatch(source, /environment-json|CUE_|TEE_SERVICE_URL/);
 });
 
 test("Phala private-image credentials are durable and separate from the push token", () => {
@@ -93,18 +114,30 @@ test("Phala private-image credentials are durable and separate from the push tok
   );
   assert.match(login.with.password, /github\.token/);
   const collect = workflow.jobs.deploy.steps.find(
-    (step) => step.name === "Collect sealed Phala environment",
+    (step) =>
+      step.name === "Collect deployment credentials and runtime configuration",
   );
-  assert.match(collect.env.REGISTRY_PASSWORD, /registry-password/);
-  assert.match(collect.env.ENVIRONMENT_JSON, /environment-json/);
+  assert.match(collect.env.REGISTRY_PASSWORD_NAME, /registryPasswordSecret/);
   assert.match(collect.run, /DSTACK_DOCKER_PASSWORD/);
   assert.doesNotMatch(collect.run, /github\.token/);
 });
 
-test("Phala health and configured URL synchronization fail closed", () => {
+test("Phala deployment is serialized and updates CVMs by id", () => {
+  const workflow = parse(
+    fs.readFileSync(`${directory}/phala-deploy.yml`, "utf8"),
+  );
+  const source = fs.readFileSync(`${directory}/phala-deploy.yml`, "utf8");
+  assert.match(workflow.jobs.deploy.concurrency.group, /cvmName/);
+  assert.equal(workflow.jobs.deploy.concurrency["cancel-in-progress"], true);
+  assert.match(source, /existing_id=/);
+  assert.match(source, /target=\(--cvm-id "\$existing_id"\)/);
+  assert.match(source, /has no id/);
+});
+
+test("Phala health checks fail closed and URL propagation stays caller-owned", () => {
   const source = fs.readFileSync(`${directory}/phala-deploy.yml`, "utf8");
   assert.match(source, /health check failed after 30 attempts/);
-  assert.match(source, /github-variables-token is required when/);
+  assert.doesNotMatch(source, /gh variable|gh workflow run|Synchronize/);
   assert.doesNotMatch(source, /::warning::/);
 });
 

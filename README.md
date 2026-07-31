@@ -214,52 +214,44 @@ pnpm 10 already default-denies build scripts, so pnpm consumers see no change.
 
 ## Phala
 
-`phala-deploy.yml` models the cue TEE deployment currently housed in
-`burnt-labs/cue-app` (the parent checkout containing `cue-api`) as one
-policy-driven reusable workflow. It runs required quality, builds a
-commit-addressed private GHCR image, deploys or updates the selected Phala CVM,
-resolves and health-checks its public HTTPS endpoint, and can synchronize that
-endpoint to a GitHub Environment variable before dispatching a dependent
-workflow.
+`phala-deploy.yml` is an application-neutral deployment primitive. It requires
+the repository's quality gates, builds a commit-addressed private GHCR image,
+deploys or updates the selected Phala CVM, resolves and health-checks its public
+HTTPS endpoint, and returns that URL to the caller. It does not know about a
+consumer's service names, secret bundle format, GitHub variables, or dependent
+workflows.
 
-Example `.github/phala-policy.jsonc` for the current cue-app layout:
+Example `.github/phala-policy.jsonc`:
 
 ```jsonc
 {
   "schemaVersion": 1,
   "workingDirectory": ".",
-  "composeFile": "cue-tee/docker-compose.phala.yaml",
-  "healthcheckPath": "/api/health",
+  "composeFile": "service/docker-compose.phala.yaml",
+  "healthcheckPath": "/health",
   "image": {
     "registry": "ghcr.io",
-    "context": "cue-tee",
-    "dockerfile": "cue-tee/Dockerfile",
-    "name": "cue-tee",
-    "environmentVariable": "TEE_IMAGE",
-    "registryUsername": "burnt-labs",
+    "context": "service",
+    "dockerfile": "service/Dockerfile",
+    "name": "service",
+    "composeVariable": "APP_IMAGE",
+    "registryUsername": "registry-user",
   },
-  "environmentSecrets": [
-    "TEE_API_KEY",
-    "TELESIGN_CUSTOMER_ID",
-    "TELESIGN_API_KEY",
-    "STRIPE_RESTRICTED_KEY",
-    "PLAID_CLIENT_ID",
-    "PLAID_SECRET",
-  ],
-  "environmentVariables": [],
+  "credentials": {
+    "phalaApiKeySecret": "PHALA_CLOUD_API_KEY",
+    "registryPasswordSecret": "REGISTRY_PASSWORD",
+  },
+  "runtimeSecrets": ["SERVICE_API_KEY"],
+  "runtimeVariables": ["LOG_LEVEL"],
   "targets": {
     "candidate": {
-      "githubEnvironment": "demo",
-      "cvmName": "cue-tee-demo",
+      "githubEnvironment": "staging",
+      "cvmName": "service-staging",
     },
     "release": {
       "githubEnvironment": "production",
-      "cvmName": "cue-tee-prod",
+      "cvmName": "service-production",
     },
-  },
-  "sync": {
-    "urlVariable": "TEE_SERVICE_URL",
-    "workflow": "deploy.yml",
   },
 }
 ```
@@ -267,11 +259,11 @@ Example `.github/phala-policy.jsonc` for the current cue-app layout:
 The consumer trigger stays thin:
 
 ```yaml
-name: Deploy TEE
+name: Deploy Phala
 on:
   push:
     branches: [main]
-    paths: [cue-tee/**, .github/phala-policy.jsonc]
+    paths: [service/**, .github/phala-policy.jsonc]
   workflow_dispatch:
     inputs:
       target:
@@ -287,21 +279,16 @@ jobs:
     uses: burnt-labs/github-workflows/.github/workflows/phala-deploy.yml@<sha> # vX.Y.Z
     with:
       target: ${{ inputs.target || 'candidate' }}
-    secrets:
-      phala-api-key: ${{ secrets.BURNT_PROD_PHALA_API_KEY }}
-      registry-password: ${{ secrets.TEE_REGISTRY_PASSWORD }}
-      environment-json: ${{ secrets.CUE_TEE_ENV_JSON }}
-      github-variables-token: ${{ secrets.GH_VARIABLES_TOKEN }}
+    secrets: inherit
 ```
 
-`environment-json` has the cue deployment's existing `{ "vars": {},
-"secrets": {} }` shape. `environmentSecrets` and `environmentVariables` are
-explicit allowlists selecting from those two objects; a declared value that is
-absent fails the deploy. Deployment credentials and the generated
-image/registry variables are reserved and cannot be forwarded by policy.
-`registry-password` must be a durable read-package credential because Phala
-pulls the private image again after the Actions job token expires.
+The credential fields and `runtimeSecrets` select exact names from the target
+GitHub Environment's inherited secrets; `runtimeVariables` selects exact names
+from its variables. A missing declared value fails before build or deploy. The
+registry password must be a durable read-package credential because Phala pulls
+the private image again after the Actions job token expires.
 
-If `sync` is present, `github-variables-token` is required and failure to update
-the environment variable fails the run. Omit `sync` when the deployed service
-has no dependent URL configuration.
+The workflow's `deployment-url` output is the boundary for consumer-specific
+orchestration. A caller that needs to store the URL or redeploy another service
+does so in its own downstream job; the reusable workflow never mutates those
+resources itself.

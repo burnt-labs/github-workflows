@@ -58,63 +58,59 @@ Phala flows. All are validated by
 Phala deployment follows the same semantic candidate/release boundary without
 inventing infrastructure environments. Each role names its actual GitHub
 Environment and CVM. The policy also owns the Docker build paths, compose file,
-health endpoint, and exact runtime configuration allowlists.
+health endpoint, deployment credential names, and exact runtime configuration
+allowlists. It contains no application-specific names or downstream workflow
+orchestration.
 
 ```jsonc
 {
   "schemaVersion": 1,
   "workingDirectory": ".",
-  "composeFile": "cue-tee/docker-compose.phala.yaml",
-  "healthcheckPath": "/api/health",
+  "composeFile": "service/docker-compose.phala.yaml",
+  "healthcheckPath": "/health",
   "image": {
     "registry": "ghcr.io",
-    "context": "cue-tee",
-    "dockerfile": "cue-tee/Dockerfile",
-    "name": "cue-tee",
-    "environmentVariable": "TEE_IMAGE",
-    "registryUsername": "burnt-labs",
+    "context": "service",
+    "dockerfile": "service/Dockerfile",
+    "name": "service",
+    "composeVariable": "APP_IMAGE",
+    "registryUsername": "registry-user",
   },
-  "environmentSecrets": [
-    "TEE_API_KEY",
-    "TELESIGN_CUSTOMER_ID",
-    "TELESIGN_API_KEY",
-    "STRIPE_RESTRICTED_KEY",
-    "PLAID_CLIENT_ID",
-    "PLAID_SECRET",
-  ],
-  "environmentVariables": ["TELESIGN_CUSTOMER_ID"],
+  "credentials": {
+    "phalaApiKeySecret": "PHALA_CLOUD_API_KEY",
+    "registryPasswordSecret": "REGISTRY_PASSWORD",
+  },
+  "runtimeSecrets": ["SERVICE_API_KEY"],
+  "runtimeVariables": ["LOG_LEVEL"],
   "targets": {
     "candidate": {
-      "githubEnvironment": "demo",
-      "cvmName": "cue-tee-demo",
+      "githubEnvironment": "staging",
+      "cvmName": "service-staging",
     },
     "release": {
       "githubEnvironment": "production",
-      "cvmName": "cue-tee-prod",
+      "cvmName": "service-production",
     },
-  },
-  "sync": {
-    "urlVariable": "TEE_SERVICE_URL",
-    "workflow": "deploy.yml",
   },
 }
 ```
 
 The image is always tagged with the deploying commit SHA and pushed to GHCR.
-The Actions job token pushes it; `registry-password` is a separate durable
-read-package credential sealed into the CVM for future pulls. Never substitute
-the ephemeral job token for that credential.
+The Actions job token pushes it. The secret named by
+`credentials.registryPasswordSecret` is a separate durable read-package
+credential sealed into the CVM for future pulls. Never substitute the ephemeral
+job token for that credential.
 
-Runtime secrets and variables are selected from the mapped `environment-json`
-secret, whose shape is `{ "vars": {}, "secrets": {} }`. Missing declared values
-fail before deploy. Deployment credentials, registry credentials, and the
-policy's image variable are reserved so the allowlists cannot override or
-accidentally publish them.
+Callers pass `secrets: inherit`. The workflow selects only the names declared by
+`credentials` and `runtimeSecrets`; it never forwards the whole secrets context
+to Phala. `runtimeVariables` selects from the target GitHub Environment's vars.
+Missing declared values fail before build or deploy. Credential names, dstack
+registry variables, and `image.composeVariable` are reserved and cannot also be
+runtime configuration.
 
-`sync` is optional. When present, the workflow stores the verified public Phala
-URL in the target GitHub Environment and optionally dispatches the named
-dependent workflow only when the URL changed. It requires a mapped
-`github-variables-token`; absence or update failure is fatal.
+The workflow returns `deployment-url` and does not mutate GitHub variables or
+dispatch another workflow. Application-specific URL propagation belongs in a
+caller job that consumes this output.
 
 ### quality-policy.jsonc
 

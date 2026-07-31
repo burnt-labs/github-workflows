@@ -7,15 +7,6 @@ on:
         description: Semantic deployment target (candidate or release)
         required: true
         type: string
-    secrets:
-      phala-api-key:
-        required: true
-      registry-password:
-        required: true
-      environment-json:
-        required: true
-      github-variables-token:
-        required: false
     outputs:
       deployment-url:
         description: Public HTTPS endpoint reported by Phala
@@ -25,17 +16,49 @@ permissions:
   contents: read
 
 jobs:
+  validate:
+    name: Validate invocation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate target
+        if: ${{ !contains(fromJSON('["candidate","release"]'), inputs.target) }}
+        run: |
+          echo "::error::target must be candidate or release"
+          exit 1
+
+  policy:
+    name: Phala policy
+    needs: validate
+    runs-on: ubuntu-latest
+    outputs:
+      phala: ${{ steps.policy.outputs.phala }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Checkout central policy tools
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: burnt-labs/github-workflows
+          ref: 89bc4ceeb7c66617f5ef9dce230b4bdfe9b5cc41
+          path: .burnt-workflows
+      - id: policy
+        name: Require and validate Phala policy
+        run: node .burnt-workflows/scripts/policy.bundle.mjs --phala
+
   quality:
-    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@89bc4ceeb7c66617f5ef9dce230b4bdfe9b5cc41
+    needs: policy
+    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@89bc4ceeb7c66617f5ef9dce230b4bdfe9b5cc41 # v1.3.0
 
   deploy:
     name: Phala ${{ inputs.target }}
-    needs: quality
-    if: contains(fromJSON('["candidate","release"]'), inputs.target)
+    needs: [policy, quality]
     runs-on: ubuntu-latest
     environment:
-      name: ${{ fromJSON(needs.quality.outputs.phala-policy).targets[inputs.target].githubEnvironment }}
+      name: ${{ fromJSON(needs.policy.outputs.phala).targets[inputs.target].githubEnvironment }}
       url: ${{ steps.phala-url.outputs.deployment-url }}
+    concurrency:
+      group: phala-${{ github.repository }}-${{ fromJSON(needs.policy.outputs.phala).targets[inputs.target].cvmName }}
+      cancel-in-progress: true
     permissions:
       contents: read
       deployments: write
@@ -45,93 +68,45 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@f7ce87c1d6bead3e36075b2ce75da1f6cc28aaca # v3.9.0
-      - name: Login to GHCR for push
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
-      - name: Resolve image
-        id: image
-        env:
-          IMAGE_NAME: ${{ fromJSON(needs.quality.outputs.phala-policy).image.name }}
-        run: |
-          repository="$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
-          echo "image=ghcr.io/${repository}/${IMAGE_NAME}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
-      - name: Build and push image
-        uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75 # v6.9.0
-        with:
-          context: ${{ fromJSON(needs.quality.outputs.phala-policy).image.context }}
-          file: ${{ fromJSON(needs.quality.outputs.phala-policy).image.dockerfile }}
-          push: true
-          tags: ${{ steps.image.outputs.image }}
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: lts/*
-      - name: Validate invocation and credentials
+      - name: Resolve image
+        id: image
         env:
-          PHALA_API_KEY: ${{ secrets.phala-api-key }}
-          REGISTRY_PASSWORD: ${{ secrets.registry-password }}
-          ENVIRONMENT_JSON: ${{ secrets.environment-json }}
-          SYNC: ${{ toJSON(fromJSON(needs.quality.outputs.phala-policy).sync) }}
-          VARIABLES_TOKEN: ${{ secrets.github-variables-token }}
+          IMAGE_NAME: ${{ fromJSON(needs.policy.outputs.phala).image.name }}
         run: |
-          if [ -z "$PHALA_API_KEY" ] || [ -z "$REGISTRY_PASSWORD" ] || [ -z "$ENVIRONMENT_JSON" ]; then
-            echo "::error::phala-api-key, registry-password, and environment-json are required"
-            exit 1
-          fi
-          if [ "$SYNC" != "null" ] && [ -z "$VARIABLES_TOKEN" ]; then
-            echo "::error::github-variables-token is required when phala-policy.jsonc configures sync"
-            exit 1
-          fi
-          case "$(npx --yes phala@1.1.20 --version)" in
-            v1.1.20 | v1.1.20+*) ;;
-            *)
-              echo "::error::Expected Phala CLI 1.1.20"
-              exit 1
-              ;;
-          esac
-      - name: Collect sealed Phala environment
+          repository="$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
+          echo "image=ghcr.io/${repository}/${IMAGE_NAME}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+      - name: Collect deployment credentials and runtime configuration
         env:
-          ENVIRONMENT_JSON: ${{ secrets.environment-json }}
-          SECRET_NAMES: ${{ toJSON(fromJSON(needs.quality.outputs.phala-policy).environmentSecrets) }}
-          VARIABLE_NAMES: ${{ toJSON(fromJSON(needs.quality.outputs.phala-policy).environmentVariables) }}
-          IMAGE_VARIABLE: ${{ fromJSON(needs.quality.outputs.phala-policy).image.environmentVariable }}
+          ALL_SECRETS: ${{ toJSON(secrets) }}
+          ALL_VARIABLES: ${{ toJSON(vars) }}
+          API_KEY_NAME: ${{ fromJSON(needs.policy.outputs.phala).credentials.phalaApiKeySecret }}
+          REGISTRY_PASSWORD_NAME: ${{ fromJSON(needs.policy.outputs.phala).credentials.registryPasswordSecret }}
+          SECRET_NAMES: ${{ toJSON(fromJSON(needs.policy.outputs.phala).runtimeSecrets) }}
+          VARIABLE_NAMES: ${{ toJSON(fromJSON(needs.policy.outputs.phala).runtimeVariables) }}
+          IMAGE_VARIABLE: ${{ fromJSON(needs.policy.outputs.phala).image.composeVariable }}
           IMAGE: ${{ steps.image.outputs.image }}
-          REGISTRY_USERNAME: ${{ fromJSON(needs.quality.outputs.phala-policy).image.registryUsername }}
-          REGISTRY_PASSWORD: ${{ secrets.registry-password }}
+          REGISTRY_USERNAME: ${{ fromJSON(needs.policy.outputs.phala).image.registryUsername }}
         run: |
           node - <<'NODE'
           const fs = require("node:fs");
-          let payload;
-          try {
-            payload = JSON.parse(process.env.ENVIRONMENT_JSON);
-          } catch (error) {
-            process.stderr.write(`::error::environment-json is not valid JSON: ${error.message}\n`);
-            process.exit(1);
-          }
-          if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-            process.stderr.write("::error::environment-json must be a JSON object\n");
-            process.exit(1);
-          }
-          const secrets = payload.secrets ?? {};
-          const variables = payload.vars ?? {};
-          if (!secrets || typeof secrets !== "object" || Array.isArray(secrets) ||
-              !variables || typeof variables !== "object" || Array.isArray(variables)) {
-            process.stderr.write("::error::environment-json vars and secrets must be objects\n");
-            process.exit(1);
-          }
+          const secrets = JSON.parse(process.env.ALL_SECRETS);
+          const variables = JSON.parse(process.env.ALL_VARIABLES);
           const secretNames = JSON.parse(process.env.SECRET_NAMES);
           const variableNames = JSON.parse(process.env.VARIABLE_NAMES);
+          const apiKey = secrets[process.env.API_KEY_NAME];
+          const registryPassword = secrets[process.env.REGISTRY_PASSWORD_NAME];
           const missing = [
+            ...(!apiKey ? [process.env.API_KEY_NAME] : []),
+            ...(!registryPassword ? [process.env.REGISTRY_PASSWORD_NAME] : []),
             ...secretNames.filter((name) => !secrets[name]),
             ...variableNames.filter((name) => !variables[name]),
           ];
           if (missing.length) {
-            process.stderr.write(`::error::Declared Phala environment values not set: ${missing.join(" ")}\n`);
+            process.stderr.write(`::error::Declared Phala configuration not set: ${missing.join(" ")}\n`);
             process.exit(1);
           }
           const environment = Object.fromEntries([
@@ -140,27 +115,50 @@ jobs:
             [process.env.IMAGE_VARIABLE, process.env.IMAGE],
             ["DSTACK_DOCKER_REGISTRY", "ghcr.io"],
             ["DSTACK_DOCKER_USERNAME", process.env.REGISTRY_USERNAME],
-            ["DSTACK_DOCKER_PASSWORD", process.env.REGISTRY_PASSWORD],
+            ["DSTACK_DOCKER_PASSWORD", registryPassword],
           ]);
           const quote = (value) => `"${String(value)
             .replaceAll("\\", "\\\\")
             .replaceAll("\n", "\\n")
             .replaceAll("\r", "\\r")
             .replaceAll('"', '\\"')}"`;
+          fs.writeFileSync(`${process.env.RUNNER_TEMP}/phala-api-key`, apiKey, { mode: 0o600 });
           fs.writeFileSync(
             `${process.env.RUNNER_TEMP}/phala.env`,
             Object.entries(environment).map(([key, value]) => `${key}=${quote(value)}`).join("\n") + "\n",
             { mode: 0o600 },
           );
           NODE
+          case "$(npx --yes phala@1.1.20 --version)" in
+            v1.1.20 | v1.1.20+*) ;;
+            *)
+              echo "::error::Expected Phala CLI 1.1.20"
+              exit 1
+              ;;
+          esac
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@f7ce87c1d6bead3e36075b2ce75da1f6cc28aaca # v3.9.0
+      - name: Login to GHCR for push
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Build and push image
+        uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75 # v6.9.0
+        with:
+          context: ${{ fromJSON(needs.policy.outputs.phala).image.context }}
+          file: ${{ fromJSON(needs.policy.outputs.phala).image.dockerfile }}
+          push: true
+          tags: ${{ steps.image.outputs.image }}
       - name: Deploy CVM
         env:
-          CVM_NAME: ${{ fromJSON(needs.quality.outputs.phala-policy).targets[inputs.target].cvmName }}
-          COMPOSE_FILE: ${{ fromJSON(needs.quality.outputs.phala-policy).composeFile }}
-          PHALA_API_KEY: ${{ secrets.phala-api-key }}
-          WORKING_DIRECTORY: ${{ fromJSON(needs.quality.outputs.phala-policy).workingDirectory }}
+          CVM_NAME: ${{ fromJSON(needs.policy.outputs.phala).targets[inputs.target].cvmName }}
+          COMPOSE_FILE: ${{ fromJSON(needs.policy.outputs.phala).composeFile }}
+          WORKING_DIRECTORY: ${{ fromJSON(needs.policy.outputs.phala).workingDirectory }}
         run: |
           cd "$WORKING_DIRECTORY"
+          PHALA_API_KEY="$(<"$RUNNER_TEMP/phala-api-key")"
           npx --yes phala@1.1.20 cvms list \
             --search "$CVM_NAME" \
             --page-size 100 \
@@ -171,7 +169,12 @@ jobs:
             echo "::error::More than one Phala CVM is named $CVM_NAME"
             exit 1
           elif [ "$existing_count" -eq 1 ]; then
-            target=(--cvm-id "$CVM_NAME")
+            existing_id="$(jq -r --arg name "$CVM_NAME" '.items[] | select(.name == $name) | .id // empty' "$RUNNER_TEMP/phala-cvms.json")"
+            if [ -z "$existing_id" ]; then
+              echo "::error::Existing Phala CVM $CVM_NAME has no id"
+              exit 1
+            fi
+            target=(--cvm-id "$existing_id")
           else
             target=(-n "$CVM_NAME")
           fi
@@ -184,9 +187,9 @@ jobs:
       - name: Resolve Phala public URL
         id: phala-url
         env:
-          CVM_NAME: ${{ fromJSON(needs.quality.outputs.phala-policy).targets[inputs.target].cvmName }}
-          PHALA_API_KEY: ${{ secrets.phala-api-key }}
+          CVM_NAME: ${{ fromJSON(needs.policy.outputs.phala).targets[inputs.target].cvmName }}
         run: |
+          PHALA_API_KEY="$(<"$RUNNER_TEMP/phala-api-key")"
           npx --yes phala@1.1.20 cvms get "$CVM_NAME" --json --api-key "$PHALA_API_KEY" > "$RUNNER_TEMP/phala-cvm.json"
           deployment_url="$(jq -r '
             [.endpoints[]?.app, .public_urls[]?.app, .publicUrls[]?.app, .public_url, .publicUrl]
@@ -201,7 +204,7 @@ jobs:
       - name: Verify health
         env:
           DEPLOYMENT_URL: ${{ steps.phala-url.outputs.deployment-url }}
-          HEALTHCHECK_PATH: ${{ fromJSON(needs.quality.outputs.phala-policy).healthcheckPath }}
+          HEALTHCHECK_PATH: ${{ fromJSON(needs.policy.outputs.phala).healthcheckPath }}
         run: |
           for attempt in $(seq 1 30); do
             if curl --fail --show-error --silent "${DEPLOYMENT_URL}${HEALTHCHECK_PATH}" >/dev/null; then
@@ -212,30 +215,4 @@ jobs:
             fi
           done
           echo "::error::Phala deployment health check failed after 30 attempts"
-          exit 1
-      - name: Synchronize deployment URL
-        if: fromJSON(needs.quality.outputs.phala-policy).sync != null
-        env:
-          DEPLOYMENT_URL: ${{ steps.phala-url.outputs.deployment-url }}
-          GH_TOKEN: ${{ secrets.github-variables-token }}
-          GITHUB_ENVIRONMENT: ${{ fromJSON(needs.quality.outputs.phala-policy).targets[inputs.target].githubEnvironment }}
-          URL_VARIABLE: ${{ fromJSON(needs.quality.outputs.phala-policy).sync.urlVariable }}
-          WORKFLOW: ${{ fromJSON(needs.quality.outputs.phala-policy).sync.workflow }}
-        run: |
-          current_url="$(gh variable list --env "$GITHUB_ENVIRONMENT" --json name,value --jq ".[] | select(.name == \"$URL_VARIABLE\") | .value")"
-          if [ "${current_url%/}" = "$DEPLOYMENT_URL" ]; then
-            exit 0
-          fi
-          gh variable set "$URL_VARIABLE" --env "$GITHUB_ENVIRONMENT" --body "$DEPLOYMENT_URL"
-          if [ -n "$WORKFLOW" ]; then
-            gh workflow run "$WORKFLOW" --ref "$GITHUB_REF_NAME"
-          fi
-
-  invalid-target:
-    name: Reject invalid target
-    if: ${{ !contains(fromJSON('["candidate","release"]'), inputs.target) }}
-    runs-on: ubuntu-latest
-    steps:
-      - run: |
-          echo "::error::target must be candidate or release"
           exit 1

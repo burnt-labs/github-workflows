@@ -304,7 +304,7 @@ export function validatePhalaPolicy(policy) {
     "context",
     "dockerfile",
     "name",
-    "environmentVariable",
+    "composeVariable",
     "registryUsername",
   ]) {
     requireString(policy.image[field], `Phala image.${field}`);
@@ -312,34 +312,55 @@ export function validatePhalaPolicy(policy) {
   if (policy.image.registry !== "ghcr.io") {
     throw new Error("Phala image.registry must equal ghcr.io");
   }
-  if (!/^[a-z0-9][a-z0-9._/-]*$/.test(policy.image.name)) {
+  const imageComponent = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
+  if (
+    !policy.image.name.split("/").every((part) => imageComponent.test(part))
+  ) {
     throw new Error(
       "Phala image.name must be a lowercase container image path",
     );
   }
-  if (!/^[A-Z][A-Z0-9_]*$/.test(policy.image.environmentVariable)) {
+  if (!/^[A-Z][A-Z0-9_]*$/.test(policy.image.composeVariable)) {
     throw new Error(
-      "Phala image.environmentVariable must be an uppercase environment-variable name",
+      "Phala image.composeVariable must be an uppercase environment-variable name",
     );
   }
 
+  if (!policy.credentials || typeof policy.credentials !== "object") {
+    throw new Error("Phala credentials must be an object");
+  }
+  for (const field of ["phalaApiKeySecret", "registryPasswordSecret"]) {
+    requireString(policy.credentials[field], `Phala credentials.${field}`);
+    if (!/^[A-Z][A-Z0-9_]*$/.test(policy.credentials[field])) {
+      throw new Error(
+        `Phala credentials.${field} must be an uppercase environment-variable name`,
+      );
+    }
+  }
+  if (
+    policy.credentials.phalaApiKeySecret ===
+    policy.credentials.registryPasswordSecret
+  ) {
+    throw new Error("Phala credential secret names must differ");
+  }
+
   const reserved = [
-    "PHALA_CLOUD_API_KEY",
-    "PHALA_API_KEY",
     "GITHUB_TOKEN",
     "DSTACK_DOCKER_REGISTRY",
     "DSTACK_DOCKER_USERNAME",
     "DSTACK_DOCKER_PASSWORD",
-    policy.image.environmentVariable,
+    policy.image.composeVariable,
+    policy.credentials.phalaApiKeySecret,
+    policy.credentials.registryPasswordSecret,
   ];
   const secretNames = validateEnvironmentNames(
-    policy.environmentSecrets,
-    "Phala environmentSecrets",
+    policy.runtimeSecrets,
+    "Phala runtimeSecrets",
     reserved,
   );
   const variableNames = validateEnvironmentNames(
-    policy.environmentVariables,
-    "Phala environmentVariables",
+    policy.runtimeVariables,
+    "Phala runtimeVariables",
     reserved,
   );
   for (const name of secretNames) {
@@ -365,30 +386,23 @@ export function validatePhalaPolicy(policy) {
         `Phala targets.${role}.cvmName must be 5-63 characters, start with a lowercase letter, end with a letter or digit, and contain no consecutive hyphens`,
       );
     }
+    const githubEnvironment = target.githubEnvironment.toLowerCase();
     if (
-      target.githubEnvironment === "preview" ||
-      target.githubEnvironment.startsWith("preview-")
+      githubEnvironment === "preview" ||
+      githubEnvironment.startsWith("preview-")
     ) {
       throw new Error("preview-specific GitHub Environments are forbidden");
     }
   }
 
-  if (policy.sync !== undefined) {
-    if (!policy.sync || typeof policy.sync !== "object") {
-      throw new Error("Phala sync must be an object");
-    }
-    requireString(policy.sync.urlVariable, "Phala sync.urlVariable");
-    if (!/^[A-Z][A-Z0-9_]*$/.test(policy.sync.urlVariable)) {
-      throw new Error(
-        "Phala sync.urlVariable must be an uppercase environment-variable name",
-      );
-    }
-    if (policy.sync.workflow !== undefined) {
-      requireString(policy.sync.workflow, "Phala sync.workflow");
-      if (!/^[A-Za-z0-9_.-]+\.ya?ml$/.test(policy.sync.workflow)) {
-        throw new Error("Phala sync.workflow must be a workflow YAML filename");
-      }
-    }
+  if (
+    policy.environmentSecrets !== undefined ||
+    policy.environmentVariables !== undefined ||
+    policy.sync !== undefined
+  ) {
+    throw new Error(
+      "Phala policy uses runtimeSecrets/runtimeVariables; URL synchronization belongs in the caller",
+    );
   }
   return policy;
 }
