@@ -199,7 +199,10 @@ test("release rejects an unrecognized operation instead of skipping", () => {
 test("release candidates cannot deploy the release target", () => {
   const source = fs.readFileSync(`${directory}/cloudflare-release.yml`, "utf8");
   assert.match(source, /inputs\.prerelease == false/);
-  assert.match(source, /outputs\.deployment-policy\)\.promotionMode == 'manual'/);
+  assert.match(
+    source,
+    /outputs\.deployment-policy\)\.promotionMode == 'manual'/,
+  );
 });
 
 test("npm uses trusted publishing without tokens or commits", () => {
