@@ -128,7 +128,9 @@ jobs:
 
   publish-github-release:
     needs: [metadata, publish-release-automatic]
-    if: needs.publish-release-automatic.result == 'success'
+    if: >-
+      !cancelled() &&
+      needs.publish-release-automatic.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write

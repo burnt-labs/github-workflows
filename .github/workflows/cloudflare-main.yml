@@ -180,7 +180,9 @@ jobs:
 
   publish-automatic-release:
     needs: [metadata, deploy-release-automatic]
-    if: needs.deploy-release-automatic.result == 'success'
+    if: >-
+      !cancelled() &&
+      needs.deploy-release-automatic.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write
