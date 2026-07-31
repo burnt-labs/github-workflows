@@ -22,14 +22,21 @@ on:
         required: true
         type: string
     secrets:
-      # Optional so that a caller can use `secrets: inherit` instead, which is
-      # what publishing Worker secrets requires — inherited secrets arrive under
-      # their own names, so these two would be empty. Resolved with a fallback
-      # to the organization names below, and a job fails loudly if neither is
-      # present rather than handing wrangler an empty token.
+      # All four are optional and exactly one pair must arrive. A caller either
+      # maps the two hyphenated names, or passes `secrets: inherit` — which is
+      # what publishing Worker secrets requires, since inherited secrets keep
+      # their own names. The organization names are declared rather than just
+      # read: actionlint types `secrets` from this block, so an undeclared
+      # lookup is an error, and declaring them makes the fallback part of the
+      # contract instead of a hidden alternative. `Validate credentials` fails
+      # the run if neither pair resolves.
       cloudflare-account-id:
         required: false
       cloudflare-api-token:
+        required: false
+      BURNT_CLOUDFLARE_ACCOUNT_ID:
+        required: false
+      BURNT_CLOUDFLARE_API_TOKEN:
         required: false
     outputs:
       version-id:
