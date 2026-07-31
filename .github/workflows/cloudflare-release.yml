@@ -69,7 +69,7 @@ jobs:
     if: >-
       inputs.operation == 'deploy' &&
       inputs.prerelease == false &&
-      needs.quality.outputs.promotionMode == 'manual'
+      fromJSON(needs.quality.outputs.deployment-policy).promotionMode == 'manual'
     permissions:
       contents: read
       deployments: write

@@ -139,7 +139,7 @@ test("Cloudflare promotion ordering is explicit", () => {
   ]);
   assert.equal(
     workflow.jobs["deploy-release-automatic"].if,
-    "needs.quality.outputs.promotionMode == 'automatic'",
+    "fromJSON(needs.quality.outputs.deployment-policy).promotionMode == 'automatic'",
   );
 });
 
@@ -199,7 +199,7 @@ test("release rejects an unrecognized operation instead of skipping", () => {
 test("release candidates cannot deploy the release target", () => {
   const source = fs.readFileSync(`${directory}/cloudflare-release.yml`, "utf8");
   assert.match(source, /inputs\.prerelease == false/);
-  assert.match(source, /outputs\.promotionMode == 'manual'/);
+  assert.match(source, /outputs\.deployment-policy\)\.promotionMode == 'manual'/);
 });
 
 test("npm uses trusted publishing without tokens or commits", () => {
@@ -226,7 +226,7 @@ test("npm promotes next before latest", () => {
   ]);
   assert.equal(
     workflow.jobs["publish-release-automatic"].if,
-    "needs.quality.outputs.npmPromotionMode == 'automatic'",
+    "fromJSON(needs.quality.outputs.npm-policy).promotionMode == 'automatic'",
   );
   assert.match(source, /candidateDistTag/);
   assert.match(source, /releaseDistTag/);
