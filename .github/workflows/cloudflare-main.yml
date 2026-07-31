@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   quality:
-    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@77500b27ddeb8d45c6bedcf56369bc8156f3a5a7
+    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@dc3c150483da96152a16d569ad735754033933cb
 
   metadata:
     needs: quality
@@ -28,7 +28,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: burnt-labs/github-workflows
-          ref: 77500b27ddeb8d45c6bedcf56369bc8156f3a5a7
+          ref: dc3c150483da96152a16d569ad735754033933cb
           path: .burnt-workflows
       - name: Read stable release tags
         env:
@@ -57,7 +57,7 @@ jobs:
     permissions:
       contents: read
       deployments: write
-    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@77500b27ddeb8d45c6bedcf56369bc8156f3a5a7
+    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@dc3c150483da96152a16d569ad735754033933cb
     with:
       # Under single topology the candidate and the release are the same
       # Worker, so deploying here would serve the merge immediately and there
@@ -81,7 +81,7 @@ jobs:
     permissions:
       contents: read
       deployments: write
-    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@77500b27ddeb8d45c6bedcf56369bc8156f3a5a7
+    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@dc3c150483da96152a16d569ad735754033933cb
     with:
       operation: preview
       target: release
@@ -164,7 +164,7 @@ jobs:
     permissions:
       contents: read
       deployments: write
-    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@77500b27ddeb8d45c6bedcf56369bc8156f3a5a7
+    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@dc3c150483da96152a16d569ad735754033933cb
     with:
       operation: deploy
       target: release
