@@ -18,6 +18,8 @@ These are not preferences. Changes that break them will be rejected.
   quality gates.
 - Pin every `uses:` reference to a full commit SHA with a trailing version
   comment. Dependabot advances the pins.
+- Pin the npm CLI in every job that runs a consumer's `install`, and never
+  accept an npm token anywhere.
 - Cut a release for any change consumers should pick up. Consumers pin by SHA
   and Dependabot resolves the version from the trailing comment, so an
   unreleased change on `main` cannot reach them.
@@ -26,7 +28,7 @@ These are not preferences. Changes that break them will be rejected.
 
 ## The flows
 
-Nine workflows. Seven are entry points; two are internal.
+Ten workflows. Eight are entry points; two are internal.
 
 | Workflow                 | Called by                   | Purpose                                        |
 | ------------------------ | --------------------------- | ---------------------------------------------- |
@@ -37,6 +39,7 @@ Nine workflows. Seven are entry points; two are internal.
 | `npm-pr.yml`             | consumer, on `pull_request` | Quality, package dry run                       |
 | `npm-main.yml`           | consumer, on push to main   | Publish the candidate dist-tag, release drafts |
 | `npm-release.yml`        | consumer, on `release`      | Publish the release dist-tag                   |
+| `phala-deploy.yml`       | consumer                    | Build and deploy a Phala CVM target            |
 | `cloudflare-version.yml` | internal                    | One `wrangler versions upload` or `deploy`     |
 | `npm-publish.yml`        | internal                    | One `npm publish` via OIDC trusted publishing  |
 
@@ -46,8 +49,72 @@ Consumers never call `cloudflare-version.yml` or `npm-publish.yml` directly.
 
 A consumer must have `.github/quality-policy.jsonc`. It additionally needs
 `.github/deployment-policy.jsonc` for Cloudflare flows and
-`.github/npm-policy.jsonc` for npm flows. All are validated by
+`.github/npm-policy.jsonc` for npm flows, or `.github/phala-policy.jsonc` for
+Phala flows. All are validated by
 `scripts/policy.mjs`; an invalid policy fails the run before anything executes.
+
+### phala-policy.jsonc
+
+Phala deployment follows the same semantic candidate/release boundary without
+inventing infrastructure environments. Each role names its actual GitHub
+Environment and CVM. The policy also owns the Docker build paths, compose file,
+health endpoint, and exact runtime configuration allowlists.
+
+```jsonc
+{
+  "schemaVersion": 1,
+  "workingDirectory": ".",
+  "composeFile": "cue-tee/docker-compose.phala.yaml",
+  "healthcheckPath": "/api/health",
+  "image": {
+    "registry": "ghcr.io",
+    "context": "cue-tee",
+    "dockerfile": "cue-tee/Dockerfile",
+    "name": "cue-tee",
+    "environmentVariable": "TEE_IMAGE",
+    "registryUsername": "burnt-labs",
+  },
+  "environmentSecrets": [
+    "TEE_API_KEY",
+    "TELESIGN_CUSTOMER_ID",
+    "TELESIGN_API_KEY",
+    "STRIPE_RESTRICTED_KEY",
+    "PLAID_CLIENT_ID",
+    "PLAID_SECRET",
+  ],
+  "environmentVariables": ["TELESIGN_CUSTOMER_ID"],
+  "targets": {
+    "candidate": {
+      "githubEnvironment": "demo",
+      "cvmName": "cue-tee-demo",
+    },
+    "release": {
+      "githubEnvironment": "production",
+      "cvmName": "cue-tee-prod",
+    },
+  },
+  "sync": {
+    "urlVariable": "TEE_SERVICE_URL",
+    "workflow": "deploy.yml",
+  },
+}
+```
+
+The image is always tagged with the deploying commit SHA and pushed to GHCR.
+The Actions job token pushes it; `registry-password` is a separate durable
+read-package credential sealed into the CVM for future pulls. Never substitute
+the ephemeral job token for that credential.
+
+Runtime secrets and variables are selected from the mapped `environment-json`
+secret, whose shape is `{ "vars": {}, "secrets": {} }`. Missing declared values
+fail before deploy. Deployment credentials, registry credentials, and the
+policy's image variable are reserved so the allowlists cannot override or
+accidentally publish them.
+
+`sync` is optional. When present, the workflow stores the verified public Phala
+URL in the target GitHub Environment and optionally dispatches the named
+dependent workflow only when the URL changed. It requires a mapped
+`github-variables-token`; absence or update failure is fatal.
 
 ### quality-policy.jsonc
 
@@ -136,7 +203,68 @@ rules; that is the cost of modelling one environment honestly.
 ```
 
 Publishing uses npm trusted publishing through GitHub OIDC with provenance. It
-never accepts an npm token — do not add one.
+never accepts an npm token — do not add one. `npm-publish.yml` fails before it
+installs anything if no OIDC token is available, because a caller that forgot
+`id-token: write` otherwise fails much later inside `npm publish`, as an
+authentication error that reads like a registry problem.
+
+That posture is also the answer to npm's deprecation of 2FA-bypass granular
+access tokens: from early August 2026 they stop skipping 2FA for account
+operations, and around January 2027 they lose publishing entirely. Nothing here
+has to migrate, because nothing here holds a token. Keep it that way — a test
+rejects any workflow that names `NPM_TOKEN` or `NODE_AUTH_TOKEN` outside the
+guard that refuses to run when one is present.
+
+## npm install-time security
+
+Every job that runs a consumer's `install` command pins the npm CLI:
+
+```yaml
+- name: Pin the npm CLI
+  run: npm install --global npm@12
+```
+
+npm 12 changed what an install does by default, and the change is invisible
+rather than loud:
+
+- **Dependency lifecycle scripts do not run.** `preinstall`, `install`,
+  `postinstall`, and implicit `node-gyp` builds are default-denied unless the
+  package is listed in the consumer's `allowScripts`. npm _warns_ and carries
+  on, so the symptom is not the install failing — it is a native module that
+  was never built, surfacing later in the build or at runtime.
+- **`allow-git` and `allow-remote` default to `none`.** Dependencies pointing at
+  a git repository or a tarball URL no longer resolve.
+
+The pin exists because `lts/*` currently bundles npm 11, which only warns about
+all of this, and will roll to an npm 12 Node on Node's schedule rather than
+ours. Unpinned, every consumer's install semantics would change on a day nobody
+picked, in the same run as whatever else that Node bump brought. Pinned, the
+change arrives when a consumer advances its SHA — reviewable, revertable, and
+attributable. The step asserts what actually landed on `PATH` rather than
+trusting the install, since a pin that silently loses to a shim buys nothing.
+
+Consumers keep the escape hatches, and should reach for them in this order:
+
+```jsonc
+// package.json — the reviewed allowlist. Generate it with
+// `npm approve-scripts`, and see what is pending with
+// `npm approve-scripts --allow-scripts-pending`.
+{ "allowScripts": { "esbuild@0.28.1": true, "some-other-package": false } }
+```
+
+```ini
+# .npmrc — for git or URL dependencies, and for CI-only script allowances.
+allow-git=root
+allow-scripts=sharp,canvas
+```
+
+An `.npmrc` in the consumer repository is deliberately not overridden by these
+workflows. Setting `npm_config_allow_git` at the job level would have made the
+policy uniform and taken the decision away from the repository that owns it.
+
+pnpm 10 already default-denies build scripts through `onlyBuiltDependencies`,
+so pnpm consumers are unaffected by the pin. Yarn is the gap: it has no
+equivalent default, and `enableScripts` in `.yarnrc.yml` is the knob.
 
 ### Worker secrets
 
@@ -371,6 +499,13 @@ to the extent that opening a PR is. Fork PRs are excluded and receive no secrets
 which is the boundary this relies on. Never pass a branch name, PR title, or any
 other free-text field into `version-message` or a `command:` input; PR numbers
 and URLs are safe.
+
+**A blocked install script does not fail the install.** npm 12 default-denies
+dependency lifecycle scripts and warns rather than erroring, so the install goes
+green and the missing native build surfaces somewhere downstream — a build step,
+a test, or production. Read the install log's warnings when a consumer's build
+breaks for no visible reason after advancing its pin. See "npm install-time
+security".
 
 **Previews still run consumer code with credentials.** `cloudflare-version.yml`
 runs the consumer's `install` and `build` in the same job that holds the

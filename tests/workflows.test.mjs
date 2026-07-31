@@ -60,6 +60,54 @@ test("Cloudflare PRs allow same-repository branches when the repository is a for
   assert.doesNotMatch(workflow.jobs.quality.if, /head\.repo\.fork/);
 });
 
+test("Phala deploys to the caller's selected real environment", () => {
+  const source = fs.readFileSync(`${directory}/phala-deploy.yml`, "utf8");
+  assert.match(source, /targets\[inputs\.target\]\.githubEnvironment/);
+  assert.doesNotMatch(source, /environment:\s*(preview|preview-)/);
+  assert.match(source, /target must be candidate or release/);
+});
+
+test("Phala uses pinned build actions and a pinned CLI", () => {
+  const source = fs.readFileSync(`${directory}/phala-deploy.yml`, "utf8");
+  assert.match(source, /docker\/build-push-action@[0-9a-f]{40}/);
+  assert.match(source, /npx --yes phala@1\.1\.20 deploy/);
+  assert.match(source, /v1\.1\.20 \| v1\.1\.20\+\*/);
+  assert.doesNotMatch(source, /npx (?!--yes phala@1\.1\.20)/);
+});
+
+test("Phala seals only policy-allowlisted runtime configuration", () => {
+  const source = fs.readFileSync(`${directory}/phala-deploy.yml`, "utf8");
+  assert.match(source, /environmentSecrets/);
+  assert.match(source, /environmentVariables/);
+  assert.match(source, /Declared Phala environment values not set/);
+  assert.match(source, /environment-json is not valid JSON/);
+  assert.doesNotMatch(source, /toJSON\(secrets\)/);
+});
+
+test("Phala private-image credentials are durable and separate from the push token", () => {
+  const workflow = parse(
+    fs.readFileSync(`${directory}/phala-deploy.yml`, "utf8"),
+  );
+  const login = workflow.jobs.deploy.steps.find(
+    (step) => step.name === "Login to GHCR for push",
+  );
+  assert.match(login.with.password, /github\.token/);
+  const collect = workflow.jobs.deploy.steps.find(
+    (step) => step.name === "Collect sealed Phala environment",
+  );
+  assert.match(collect.env.REGISTRY_PASSWORD, /registry-password/);
+  assert.match(collect.env.ENVIRONMENT_JSON, /environment-json/);
+  assert.match(collect.run, /DSTACK_DOCKER_PASSWORD/);
+  assert.doesNotMatch(collect.run, /github\.token/);
+});
+
+test("Phala health and configured URL synchronization fail closed", () => {
+  const source = fs.readFileSync(`${directory}/phala-deploy.yml`, "utf8");
+  assert.match(source, /health check failed after 30 attempts/);
+  assert.match(source, /github-variables-token is required when/);
+  assert.doesNotMatch(source, /::warning::/);
+});
+
 test("the single-topology --env fragment cannot fall through", () => {
   // GitHub's && / || return the last evaluated operand, and '' is falsy. So
   // `topology == 'single' && '' || format('--env {0}', …)` returns the format
@@ -220,8 +268,66 @@ test("npm uses trusted publishing without tokens or commits", () => {
   assert.match(source, /id-token: write/);
   assert.match(source, /npm publish/);
   assert.match(source, /--provenance/);
-  assert.doesNotMatch(source, /NPM_TOKEN|NODE_AUTH_TOKEN/);
   assert.doesNotMatch(source, /\bgit (commit|push)\b/);
+});
+
+test("no workflow accepts an npm token", () => {
+  // npm is retiring 2FA-bypass granular access tokens: they stop skipping 2FA
+  // for account operations in August 2026 and lose publishing entirely around
+  // January 2027. Publishing here is OIDC trusted publishing and nothing else,
+  // so the only mention of a token name allowed anywhere is npm-publish.yml
+  // refusing to run when one is present.
+  for (const name of fs.readdirSync(directory)) {
+    if (!name.endsWith(".yml")) continue;
+    const source = fs.readFileSync(`${directory}/${name}`, "utf8");
+    for (const [line] of source.matchAll(
+      /^.*(NPM_TOKEN|NODE_AUTH_TOKEN).*$/gm,
+    )) {
+      assert.match(line, /-n "\$\{|must not carry one/, `${name}: ${line}`);
+    }
+  }
+});
+
+test("publishing fails loudly when the caller withholds OIDC", () => {
+  // Without id-token: write the failure surfaces inside `npm publish` as an
+  // authentication error that reads like a registry outage, and the caller's
+  // missing permission is nowhere in it.
+  const source = fs.readFileSync(`${directory}/npm-publish.yml`, "utf8");
+  assert.match(source, /ACTIONS_ID_TOKEN_REQUEST_URL/);
+  assert.match(source, /must grant id-token: write/);
+});
+
+test("every job that installs consumer dependencies pins the npm CLI", () => {
+  // Node's `lts/*` bundles npm 11, which only warns about the install-time
+  // defaults npm 12 enforces — default-deny dependency lifecycle scripts, and
+  // allow-git and allow-remote at none. `lts/*` rolls to an npm 12 Node on its
+  // own schedule, so an unpinned CLI means every consumer's install semantics
+  // change on a day nobody chose. Pinning is what makes that a decision.
+  const pins = new Map();
+  for (const name of fs.readdirSync(directory)) {
+    if (!name.endsWith(".yml")) continue;
+    const source = fs.readFileSync(`${directory}/${name}`, "utf8");
+    if (!source.includes("commands.install")) continue;
+    const pin = source.match(/npm install --global npm@(\d+)/);
+    assert.ok(pin, `${name} runs a consumer install without pinning npm`);
+    assert.ok(
+      Number(pin[1]) >= 12,
+      `${name}: npm ${pin[1]} predates the install-time security defaults`,
+    );
+    // A pin that silently loses to a corepack shim or a consumer .npmrc buys
+    // nothing, so each one asserts what actually landed on PATH.
+    assert.match(source, /Something is shadowing the pinned CLI/, name);
+    pins.set(name, pin[1]);
+  }
+  assert.ok(
+    pins.size >= 4,
+    `expected every install path pinned, got ${pins.size}`,
+  );
+  assert.equal(
+    new Set(pins.values()).size,
+    1,
+    `workflows disagree on the npm major: ${[...pins].map(([n, v]) => `${n}=${v}`).join(", ")}`,
+  );
 });
 
 test("npm promotes next before latest", () => {

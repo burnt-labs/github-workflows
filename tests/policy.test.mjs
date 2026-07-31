@@ -4,6 +4,7 @@ import {
   parseJsonc,
   validateDeploymentPolicy,
   validateNpmPolicy,
+  validatePhalaPolicy,
   validateQualityPolicy,
 } from "../scripts/policy.mjs";
 
@@ -78,6 +79,33 @@ function deploymentPolicy(topology = "standard") {
         },
       ]),
     ),
+  };
+}
+
+function phalaPolicy() {
+  return {
+    schemaVersion: 1,
+    workingDirectory: ".",
+    composeFile: "cue-tee/docker-compose.phala.yaml",
+    healthcheckPath: "/api/health",
+    image: {
+      registry: "ghcr.io",
+      context: "cue-tee",
+      dockerfile: "cue-tee/Dockerfile",
+      name: "cue-tee",
+      environmentVariable: "TEE_IMAGE",
+      registryUsername: "burnt-labs",
+    },
+    environmentSecrets: ["TEE_API_KEY", "TELESIGN_API_KEY"],
+    environmentVariables: ["TELESIGN_CUSTOMER_ID"],
+    targets: {
+      candidate: { githubEnvironment: "demo", cvmName: "cue-tee-demo" },
+      release: {
+        githubEnvironment: "production",
+        cvmName: "cue-tee-prod",
+      },
+    },
+    sync: { urlVariable: "TEE_SERVICE_URL", workflow: "deploy.yml" },
   };
 }
 
@@ -276,6 +304,74 @@ test("quality accepts an optional validate command", () => {
   const empty = qualityPolicy();
   empty.commands.validate = "";
   assert.throws(() => validateQualityPolicy(empty), /commands\.validate/);
+});
+
+test("Phala accepts a cue-style GHCR deployment policy", () => {
+  assert.deepEqual(validatePhalaPolicy(phalaPolicy()), phalaPolicy());
+});
+
+test("Phala requires concrete deployment and image fields", () => {
+  for (const [mutate, pattern] of [
+    [(policy) => (policy.healthcheckPath = "api/health"), /must start with/],
+    [(policy) => (policy.image.registry = "docker.io"), /must equal ghcr\.io/],
+    [(policy) => (policy.image.name = "Cue TEE"), /lowercase container/],
+    [
+      (policy) => (policy.targets.candidate.cvmName = "Cue_TEE"),
+      /5-63 characters/,
+    ],
+    [(policy) => (policy.targets.candidate.cvmName = "cvm"), /5-63 characters/],
+    [
+      (policy) => (policy.targets.candidate.cvmName = "cue--tee"),
+      /5-63 characters/,
+    ],
+    [
+      (policy) => (policy.targets.candidate.githubEnvironment = "preview-demo"),
+      /preview-specific/,
+    ],
+  ]) {
+    const policy = phalaPolicy();
+    mutate(policy);
+    assert.throws(() => validatePhalaPolicy(policy), pattern);
+  }
+});
+
+test("Phala environment forwarding is explicit and cannot include credentials", () => {
+  for (const name of [
+    "PHALA_CLOUD_API_KEY",
+    "GITHUB_TOKEN",
+    "DSTACK_DOCKER_PASSWORD",
+    "TEE_IMAGE",
+  ]) {
+    const policy = phalaPolicy();
+    policy.environmentSecrets = [name];
+    assert.throws(() => validatePhalaPolicy(policy), /reserved name/);
+  }
+
+  const duplicate = phalaPolicy();
+  duplicate.environmentVariables.push("TELESIGN_CUSTOMER_ID");
+  assert.throws(() => validatePhalaPolicy(duplicate), /lists .* twice/);
+
+  const crossed = phalaPolicy();
+  crossed.environmentVariables.push("TEE_API_KEY");
+  assert.throws(
+    () => validatePhalaPolicy(crossed),
+    /both a secret and a variable/,
+  );
+});
+
+test("Phala URL synchronization names an environment variable and workflow file", () => {
+  const noSync = phalaPolicy();
+  delete noSync.sync;
+  assert.deepEqual(validatePhalaPolicy(noSync), noSync);
+
+  for (const [urlVariable, workflow] of [
+    ["tee-url", "deploy.yml"],
+    ["TEE_SERVICE_URL", "../deploy.yml"],
+  ]) {
+    const policy = phalaPolicy();
+    policy.sync = { urlVariable, workflow };
+    assert.throws(() => validatePhalaPolicy(policy), /Phala sync/);
+  }
 });
 
 test("deployment rejects preview-specific environments", () => {

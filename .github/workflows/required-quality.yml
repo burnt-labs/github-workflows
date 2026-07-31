@@ -20,6 +20,9 @@ on:
       npmPromotionMode:
         description: Manual or automatic when npm policy is present
         value: ${{ jobs.policy.outputs['npm-promotion-mode'] }}
+      phala-policy:
+        description: Validated Phala policy when present
+        value: ${{ jobs.policy.outputs.phala }}
 
 permissions:
   contents: read
@@ -34,6 +37,7 @@ jobs:
       promotion-mode: ${{ steps.policy.outputs['promotion-mode'] }}
       npm: ${{ steps.policy.outputs.npm }}
       npm-promotion-mode: ${{ steps.policy.outputs['npm-promotion-mode'] }}
+      phala: ${{ steps.policy.outputs.phala }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -63,6 +67,14 @@ jobs:
           node-version: lts/*
       - name: Enable Corepack
         run: corepack enable
+      - name: Pin the npm CLI
+        # See "npm install-time security" in AGENTS.md.
+        run: |
+          npm install --global npm@12
+          if [ "$(npm --version | cut -d. -f1)" != "12" ]; then
+            echo "::error::Expected npm 12 on PATH, found $(npm --version). Something is shadowing the pinned CLI."
+            exit 1
+          fi
       - name: Install
         run: ${{ fromJSON(needs.policy.outputs.quality).commands.install }}
       - name: Lint

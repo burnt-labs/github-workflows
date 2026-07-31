@@ -13,6 +13,7 @@ Consumers define:
 - `.github/quality-policy.jsonc`
 - `.github/deployment-policy.jsonc` for Cloudflare deployments
 - `.github/npm-policy.jsonc` for npm packages
+- `.github/phala-policy.jsonc` for Phala CVM deployments
 
 Quality policy commands are mandatory and independently run: install, lint,
 Prettier, type-check, tests, coverage, and build. Each repository also owns
@@ -183,3 +184,124 @@ Example policy:
   "releaseDistTag": "latest",
 }
 ```
+
+npm's deprecation of 2FA-bypass granular access tokens — no 2FA skipping for
+account operations from early August 2026, no publishing at all around January
+2027 — requires no migration here. These workflows never held a token, and a
+test keeps it that way.
+
+### Install-time security
+
+Every job that runs a consumer's `install` command pins the npm CLI to npm 12,
+which changed what an install does by default: dependency lifecycle scripts
+(`preinstall`, `install`, `postinstall`, `node-gyp` builds) are default-denied
+unless allowlisted, and `allow-git` and `allow-remote` default to `none`.
+
+npm **warns** rather than failing when it skips a script, so an unbuilt native
+module surfaces later — in the build, the tests, or production. Repositories
+that depend on install scripts should run `npm approve-scripts` and commit the
+resulting `allowScripts` field before advancing their pin;
+`npm approve-scripts --allow-scripts-pending` lists what is unreviewed without
+writing anything.
+
+The pin exists so this arrives on a schedule someone chose. Node's `lts/*` still
+bundles npm 11, which only warns about the new defaults, and will roll to an
+npm 12 Node on its own timing — unpinned, every consumer's install semantics
+would change on a day nobody picked. A consumer's own `.npmrc` still wins;
+these workflows set no npm config.
+
+pnpm 10 already default-denies build scripts, so pnpm consumers see no change.
+
+## Phala
+
+`phala-deploy.yml` models the cue TEE deployment currently housed in
+`burnt-labs/cue-app` (the parent checkout containing `cue-api`) as one
+policy-driven reusable workflow. It runs required quality, builds a
+commit-addressed private GHCR image, deploys or updates the selected Phala CVM,
+resolves and health-checks its public HTTPS endpoint, and can synchronize that
+endpoint to a GitHub Environment variable before dispatching a dependent
+workflow.
+
+Example `.github/phala-policy.jsonc` for the current cue-app layout:
+
+```jsonc
+{
+  "schemaVersion": 1,
+  "workingDirectory": ".",
+  "composeFile": "cue-tee/docker-compose.phala.yaml",
+  "healthcheckPath": "/api/health",
+  "image": {
+    "registry": "ghcr.io",
+    "context": "cue-tee",
+    "dockerfile": "cue-tee/Dockerfile",
+    "name": "cue-tee",
+    "environmentVariable": "TEE_IMAGE",
+    "registryUsername": "burnt-labs",
+  },
+  "environmentSecrets": [
+    "TEE_API_KEY",
+    "TELESIGN_CUSTOMER_ID",
+    "TELESIGN_API_KEY",
+    "STRIPE_RESTRICTED_KEY",
+    "PLAID_CLIENT_ID",
+    "PLAID_SECRET",
+  ],
+  "environmentVariables": [],
+  "targets": {
+    "candidate": {
+      "githubEnvironment": "demo",
+      "cvmName": "cue-tee-demo",
+    },
+    "release": {
+      "githubEnvironment": "production",
+      "cvmName": "cue-tee-prod",
+    },
+  },
+  "sync": {
+    "urlVariable": "TEE_SERVICE_URL",
+    "workflow": "deploy.yml",
+  },
+}
+```
+
+The consumer trigger stays thin:
+
+```yaml
+name: Deploy TEE
+on:
+  push:
+    branches: [main]
+    paths: [cue-tee/**, .github/phala-policy.jsonc]
+  workflow_dispatch:
+    inputs:
+      target:
+        required: true
+        type: choice
+        options: [candidate, release]
+permissions:
+  contents: read
+  deployments: write
+  packages: write
+jobs:
+  phala:
+    uses: burnt-labs/github-workflows/.github/workflows/phala-deploy.yml@<sha> # vX.Y.Z
+    with:
+      target: ${{ inputs.target || 'candidate' }}
+    secrets:
+      phala-api-key: ${{ secrets.BURNT_PROD_PHALA_API_KEY }}
+      registry-password: ${{ secrets.TEE_REGISTRY_PASSWORD }}
+      environment-json: ${{ secrets.CUE_TEE_ENV_JSON }}
+      github-variables-token: ${{ secrets.GH_VARIABLES_TOKEN }}
+```
+
+`environment-json` has the cue deployment's existing `{ "vars": {},
+"secrets": {} }` shape. `environmentSecrets` and `environmentVariables` are
+explicit allowlists selecting from those two objects; a declared value that is
+absent fails the deploy. Deployment credentials and the generated
+image/registry variables are reserved and cannot be forwarded by policy.
+`registry-password` must be a durable read-package credential because Phala
+pulls the private image again after the Actions job token expires.
+
+If `sync` is present, `github-variables-token` is required and failure to update
+the environment variable fails the run. Omit `sync` when the deployed service
+has no dependent URL configuration.

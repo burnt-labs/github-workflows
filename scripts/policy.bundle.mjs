@@ -1014,6 +1014,7 @@ function printParseErrorCode(code) {
 var QUALITY_PATH = ".github/quality-policy.jsonc";
 var DEPLOYMENT_PATH = ".github/deployment-policy.jsonc";
 var NPM_PATH = ".github/npm-policy.jsonc";
+var PHALA_PATH = ".github/phala-policy.jsonc";
 var REQUIRED_COMMANDS = [
   "install",
   "lint",
@@ -1220,10 +1221,138 @@ function validateNpmPolicy(policy) {
   }
   return policy;
 }
+function validateEnvironmentNames(values, label, reserved = []) {
+  if (!Array.isArray(values)) {
+    throw new Error(`${label} must be an array`);
+  }
+  const seen = /* @__PURE__ */ new Set();
+  for (const name of values) {
+    requireString(name, `${label} entry`);
+    if (!/^[A-Z][A-Z0-9_]*$/.test(name)) {
+      throw new Error(
+        `${label} entry ${name} must be an uppercase environment-variable name`,
+      );
+    }
+    if (seen.has(name)) {
+      throw new Error(`${label} lists ${name} twice`);
+    }
+    if (reserved.includes(name)) {
+      throw new Error(`${label} must not include reserved name ${name}`);
+    }
+    seen.add(name);
+  }
+  return seen;
+}
+function validatePhalaPolicy(policy) {
+  if (!policy || typeof policy !== "object" || Array.isArray(policy)) {
+    throw new Error("Phala policy must be an object");
+  }
+  if (policy.schemaVersion !== 1) {
+    throw new Error("Phala schemaVersion must equal 1");
+  }
+  requireString(policy.workingDirectory, "Phala workingDirectory");
+  requireString(policy.composeFile, "Phala composeFile");
+  requireString(policy.healthcheckPath, "Phala healthcheckPath");
+  if (!policy.healthcheckPath.startsWith("/")) {
+    throw new Error("Phala healthcheckPath must start with /");
+  }
+  if (!policy.image || typeof policy.image !== "object") {
+    throw new Error("Phala image must be an object");
+  }
+  for (const field of [
+    "context",
+    "dockerfile",
+    "name",
+    "environmentVariable",
+    "registryUsername",
+  ]) {
+    requireString(policy.image[field], `Phala image.${field}`);
+  }
+  if (policy.image.registry !== "ghcr.io") {
+    throw new Error("Phala image.registry must equal ghcr.io");
+  }
+  if (!/^[a-z0-9][a-z0-9._/-]*$/.test(policy.image.name)) {
+    throw new Error(
+      "Phala image.name must be a lowercase container image path",
+    );
+  }
+  if (!/^[A-Z][A-Z0-9_]*$/.test(policy.image.environmentVariable)) {
+    throw new Error(
+      "Phala image.environmentVariable must be an uppercase environment-variable name",
+    );
+  }
+  const reserved = [
+    "PHALA_CLOUD_API_KEY",
+    "PHALA_API_KEY",
+    "GITHUB_TOKEN",
+    "DSTACK_DOCKER_REGISTRY",
+    "DSTACK_DOCKER_USERNAME",
+    "DSTACK_DOCKER_PASSWORD",
+    policy.image.environmentVariable,
+  ];
+  const secretNames = validateEnvironmentNames(
+    policy.environmentSecrets,
+    "Phala environmentSecrets",
+    reserved,
+  );
+  const variableNames = validateEnvironmentNames(
+    policy.environmentVariables,
+    "Phala environmentVariables",
+    reserved,
+  );
+  for (const name of secretNames) {
+    if (variableNames.has(name)) {
+      throw new Error(
+        `Phala environment name ${name} cannot be both a secret and a variable`,
+      );
+    }
+  }
+  for (const role of ["candidate", "release"]) {
+    const target = policy.targets?.[role];
+    if (!target || typeof target !== "object") {
+      throw new Error(`Phala targets.${role} must be an object`);
+    }
+    requireString(
+      target.githubEnvironment,
+      `Phala targets.${role}.githubEnvironment`,
+    );
+    requireString(target.cvmName, `Phala targets.${role}.cvmName`);
+    if (!/^[a-z](?!.*--)[a-z0-9-]{3,61}[a-z0-9]$/.test(target.cvmName)) {
+      throw new Error(
+        `Phala targets.${role}.cvmName must be 5-63 characters, start with a lowercase letter, end with a letter or digit, and contain no consecutive hyphens`,
+      );
+    }
+    if (
+      target.githubEnvironment === "preview" ||
+      target.githubEnvironment.startsWith("preview-")
+    ) {
+      throw new Error("preview-specific GitHub Environments are forbidden");
+    }
+  }
+  if (policy.sync !== void 0) {
+    if (!policy.sync || typeof policy.sync !== "object") {
+      throw new Error("Phala sync must be an object");
+    }
+    requireString(policy.sync.urlVariable, "Phala sync.urlVariable");
+    if (!/^[A-Z][A-Z0-9_]*$/.test(policy.sync.urlVariable)) {
+      throw new Error(
+        "Phala sync.urlVariable must be an uppercase environment-variable name",
+      );
+    }
+    if (policy.sync.workflow !== void 0) {
+      requireString(policy.sync.workflow, "Phala sync.workflow");
+      if (!/^[A-Za-z0-9_.-]+\.ya?ml$/.test(policy.sync.workflow)) {
+        throw new Error("Phala sync.workflow must be a workflow YAML filename");
+      }
+    }
+  }
+  return policy;
+}
 function loadPolicies(
   root = process.cwd(),
   deploymentRequired = false,
   npmRequired = false,
+  phalaRequired = false,
 ) {
   const qualityFile = path.join(root, QUALITY_PATH);
   const quality = validateQualityPolicy(
@@ -1243,7 +1372,14 @@ function loadPolicies(
       parseJsonc(fs.readFileSync(npmFile, "utf8"), npmFile),
     );
   }
-  return { quality, deployment, npm };
+  let phala;
+  const phalaFile = path.join(root, PHALA_PATH);
+  if (phalaRequired || fs.existsSync(phalaFile)) {
+    phala = validatePhalaPolicy(
+      parseJsonc(fs.readFileSync(phalaFile, "utf8"), phalaFile),
+    );
+  }
+  return { quality, deployment, npm, phala };
 }
 function writeOutput(name, value) {
   if (!process.env.GITHUB_OUTPUT) {
@@ -1258,10 +1394,12 @@ function writeOutput(name, value) {
 function runPolicy() {
   const deploymentRequired = process.argv.includes("--deployment");
   const npmRequired = process.argv.includes("--npm");
-  const { quality, deployment, npm } = loadPolicies(
+  const phalaRequired = process.argv.includes("--phala");
+  const { quality, deployment, npm, phala } = loadPolicies(
     process.env.POLICY_ROOT ?? process.cwd(),
     deploymentRequired,
     npmRequired,
+    phalaRequired,
   );
   writeOutput("quality", JSON.stringify(quality));
   if (deployment) {
@@ -1271,6 +1409,9 @@ function runPolicy() {
   if (npm) {
     writeOutput("npm", JSON.stringify(npm));
     writeOutput("npm-promotion-mode", npm.promotionMode);
+  }
+  if (phala) {
+    writeOutput("phala", JSON.stringify(phala));
   }
 }
 
