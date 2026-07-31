@@ -169,6 +169,9 @@ test("workerSecrets cannot forward the deployment credential", () => {
     "BURNT_CLOUDFLARE_ACCOUNT_ID",
     "CLOUDFLARE_API_TOKEN",
     "CLOUDFLARE_ACCOUNT_ID",
+    // GitHub supplies this one automatically, so nothing has to be configured
+    // for it to be present and pass the missing-secret check.
+    "GITHUB_TOKEN",
   ]) {
     const policy = deploymentPolicy();
     policy.workerSecrets = [reserved];

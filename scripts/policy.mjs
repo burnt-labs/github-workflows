@@ -132,13 +132,18 @@ export function validateDeploymentPolicy(policy) {
       }
       seen.add(name);
     }
-    // Naming either of these would publish the deployment credential into the
-    // Worker, where any code in it — or anyone who can read a binding — has it.
+    // Naming any of these would publish a credential into the Worker, where any
+    // code in it — or anyone who can read a binding — has it. GITHUB_TOKEN is
+    // on the list because GitHub puts the job token in the secrets context
+    // automatically: nobody has to configure it, so the missing-secret check
+    // would pass and the job's own token, carrying this job's permissions,
+    // would be written into the Worker.
     for (const reserved of [
       "BURNT_CLOUDFLARE_API_TOKEN",
       "BURNT_CLOUDFLARE_ACCOUNT_ID",
       "CLOUDFLARE_API_TOKEN",
       "CLOUDFLARE_ACCOUNT_ID",
+      "GITHUB_TOKEN",
     ]) {
       if (seen.has(reserved)) {
         throw new Error(

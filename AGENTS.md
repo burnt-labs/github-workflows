@@ -164,6 +164,24 @@ not skip the secret and carry on — absent configuration that degrades quietly 
 how a Worker ends up running without a credential it needs and reporting
 success.
 
+**Secrets are published on deploy, never on preview.** `wrangler secret bulk`
+creates a Worker version and deploys it immediately, so running it on a preview
+would serve an intermediate version — on a `chain` repository that means mainnet
+starts serving from a job whose entire purpose is not to serve. A preview
+therefore runs against whatever secrets are already on the Worker, the same way
+it inherits its bindings. A brand-new secret is live from the first deploy that
+publishes it, not from the preview before it.
+
+**Removing a name from `workerSecrets` does not revoke it.** The list is an
+upsert, not a reconciliation: the deploy sets what it names and leaves
+everything else alone. A secret dropped from the policy stays on the Worker and
+stays readable by Worker code. Deleting instead would mean the workflow removing
+secrets it did not set, which is worse — plenty of Workers have secrets set
+outside this policy. Revoke deliberately with `wrangler secret delete`, and note
+that this needs Cloudflare access, which is the thing the rest of this section
+exists to avoid. Treat a removal as unfinished until someone with access has
+done it.
+
 Callers that use this must pass `secrets: inherit` rather than the two named
 secrets, because inherited secrets arrive under their own names. Both forms
 work: `cloudflare-version.yml` resolves `cloudflare-api-token` first and falls

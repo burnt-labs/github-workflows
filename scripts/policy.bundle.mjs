@@ -1127,6 +1127,7 @@ function validateDeploymentPolicy(policy) {
       "BURNT_CLOUDFLARE_ACCOUNT_ID",
       "CLOUDFLARE_API_TOKEN",
       "CLOUDFLARE_ACCOUNT_ID",
+      "GITHUB_TOKEN",
     ]) {
       if (seen.has(reserved)) {
         throw new Error(

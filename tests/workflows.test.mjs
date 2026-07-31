@@ -75,6 +75,36 @@ test("Worker secrets are allowlisted, never forwarded wholesale", () => {
   assert.doesNotMatch(source, /secret bulk[^\n]*ALL_SECRETS/);
 });
 
+test("Worker secrets are published on deploy but never on preview", () => {
+  // `wrangler secret bulk` creates a version and deploys it immediately, so
+  // doing this on a preview would serve an intermediate version — on a chain
+  // repository, straight to mainnet from a job whose purpose is not to serve.
+  const workflow = parse(
+    fs.readFileSync(`${directory}/cloudflare-version.yml`, "utf8"),
+  );
+  const collect = workflow.jobs.version.steps.find(
+    (step) => step.id === "worker-secrets",
+  );
+  assert.match(collect.if, /inputs\.operation == 'deploy'/);
+});
+
+test("Worker secrets are published by the pinned action, not consumer wrangler", () => {
+  // Resolving wrangler from the consumer's node_modules would put a
+  // caller-controlled binary in the same step as the deployment credential.
+  const workflow = parse(
+    fs.readFileSync(`${directory}/cloudflare-version.yml`, "utf8"),
+  );
+  const publish = workflow.jobs.version.steps.find(
+    (step) => step.name === "Publish Worker secrets",
+  );
+  assert.match(publish.uses, /^cloudflare\/wrangler-action@[0-9a-f]{40}$/);
+  assert.match(publish.command ?? publish.with.command, /secret bulk/);
+  assert.match(
+    publish.with.workingDirectory,
+    /deployment-policy\)\.workingDirectory/,
+  );
+});
+
 test("a missing declared Worker secret fails the deploy", () => {
   // Absent configuration must not degrade quietly: wrangler would happily
   // deploy without it and the Worker would fail at runtime, or worse, not fail.
