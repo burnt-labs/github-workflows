@@ -139,15 +139,16 @@ test("Cloudflare promotion ordering is explicit", () => {
   ]);
   assert.equal(
     workflow.jobs["deploy-release-automatic"].if,
-    "needs.quality.outputs['promotion-mode'] == 'automatic'",
+    "needs.quality.outputs.promotionMode == 'automatic'",
   );
 });
 
-test("hyphenated promotion outputs use bracket notation", () => {
+test("promotion outputs use workflow-safe names", () => {
   const requiredQuality = fs.readFileSync(
     `${directory}/required-quality.yml`,
     "utf8",
   );
+  assert.match(requiredQuality, /promotionMode:/);
   assert.match(requiredQuality, /jobs\.policy\.outputs\['promotion-mode'\]/);
   assert.match(
     requiredQuality,
@@ -161,7 +162,7 @@ test("hyphenated promotion outputs use bracket notation", () => {
     "npm-release.yml",
   ]) {
     const source = fs.readFileSync(`${directory}/${workflowName}`, "utf8");
-    assert.doesNotMatch(source, /outputs\.(?:npm-)?promotion-mode/);
+    assert.doesNotMatch(source, /outputs\[['"](?:npm-)?promotion-mode/);
   }
 });
 
@@ -198,7 +199,7 @@ test("release rejects an unrecognized operation instead of skipping", () => {
 test("release candidates cannot deploy the release target", () => {
   const source = fs.readFileSync(`${directory}/cloudflare-release.yml`, "utf8");
   assert.match(source, /inputs\.prerelease == false/);
-  assert.match(source, /\['promotion-mode'\] == 'manual'/);
+  assert.match(source, /outputs\.promotionMode == 'manual'/);
 });
 
 test("npm uses trusted publishing without tokens or commits", () => {
@@ -225,7 +226,7 @@ test("npm promotes next before latest", () => {
   ]);
   assert.equal(
     workflow.jobs["publish-release-automatic"].if,
-    "needs.quality.outputs['npm-promotion-mode'] == 'automatic'",
+    "needs.quality.outputs.npmPromotionMode == 'automatic'",
   );
   assert.match(source, /candidateDistTag/);
   assert.match(source, /releaseDistTag/);

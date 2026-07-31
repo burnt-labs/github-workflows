@@ -159,7 +159,7 @@ jobs:
 
   deploy-release-automatic:
     needs: [quality, metadata, create-releases]
-    if: needs.quality.outputs['promotion-mode'] == 'automatic'
+    if: needs.quality.outputs.promotionMode == 'automatic'
     permissions:
       contents: read
       deployments: write

@@ -69,7 +69,7 @@ jobs:
     if: >-
       inputs.operation == 'deploy' &&
       inputs.prerelease == false &&
-      needs.quality.outputs['promotion-mode'] == 'manual'
+      needs.quality.outputs.promotionMode == 'manual'
     permissions:
       contents: read
       deployments: write

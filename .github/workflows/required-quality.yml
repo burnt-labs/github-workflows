@@ -11,13 +11,13 @@ on:
       deployment-policy:
         description: Validated deployment policy when present
         value: ${{ jobs.policy.outputs.deployment }}
-      promotion-mode:
+      promotionMode:
         description: Manual or automatic when deployment policy is present
         value: ${{ jobs.policy.outputs['promotion-mode'] }}
       npm-policy:
         description: Validated npm policy when present
         value: ${{ jobs.policy.outputs.npm }}
-      npm-promotion-mode:
+      npmPromotionMode:
         description: Manual or automatic when npm policy is present
         value: ${{ jobs.policy.outputs['npm-promotion-mode'] }}
 
