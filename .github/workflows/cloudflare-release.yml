@@ -46,7 +46,7 @@ jobs:
 
   quality:
     needs: validate
-    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@dc3c150483da96152a16d569ad735754033933cb
+    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@f90b1a557a9cf5805ef4ac32fdda0a468fc6c166
 
   preview-release:
     needs: quality
@@ -54,7 +54,7 @@ jobs:
     permissions:
       contents: read
       deployments: write
-    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@dc3c150483da96152a16d569ad735754033933cb
+    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@f90b1a557a9cf5805ef4ac32fdda0a468fc6c166
     with:
       operation: preview
       target: release
@@ -73,7 +73,7 @@ jobs:
     permissions:
       contents: read
       deployments: write
-    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@dc3c150483da96152a16d569ad735754033933cb
+    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@f90b1a557a9cf5805ef4ac32fdda0a468fc6c166
     with:
       operation: deploy
       target: release
