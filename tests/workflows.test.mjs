@@ -50,6 +50,16 @@ test("Cloudflare uses the caller target environment", () => {
   assert.doesNotMatch(source, /environment:\s*(preview|preview-)/);
 });
 
+test("Cloudflare PRs allow same-repository branches when the repository is a fork", () => {
+  const source = fs.readFileSync(`${directory}/cloudflare-pr.yml`, "utf8");
+  const workflow = parse(source);
+  assert.match(
+    workflow.jobs.quality.if,
+    /head\.repo\.full_name == github\.repository/,
+  );
+  assert.doesNotMatch(workflow.jobs.quality.if, /head\.repo\.fork/);
+});
+
 test("the single-topology --env fragment cannot fall through", () => {
   // GitHub's && / || return the last evaluated operand, and '' is falsy. So
   // `topology == 'single' && '' || format('--env {0}', …)` returns the format
