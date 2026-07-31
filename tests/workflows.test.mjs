@@ -64,6 +64,24 @@ test("the single-topology --env fragment cannot fall through", () => {
   assert.doesNotMatch(fragment, /&& ''/);
 });
 
+test("Worker secrets are allowlisted, never forwarded wholesale", () => {
+  // toJSON(secrets) in the publish step contains every secret the caller
+  // inherited, the Cloudflare API token included. The allowlist is the entire
+  // safety property, so the step must select from the policy rather than pipe
+  // the whole object to wrangler.
+  const source = fs.readFileSync(`${directory}/cloudflare-version.yml`, "utf8");
+  assert.match(source, /workerSecrets/);
+  assert.match(source, /\$want \| map\(\{key: \., value: \$all\[\.\]\}\)/);
+  assert.doesNotMatch(source, /secret bulk[^\n]*ALL_SECRETS/);
+});
+
+test("a missing declared Worker secret fails the deploy", () => {
+  // Absent configuration must not degrade quietly: wrangler would happily
+  // deploy without it and the Worker would fail at runtime, or worse, not fail.
+  const source = fs.readFileSync(`${directory}/cloudflare-version.yml`, "utf8");
+  assert.match(source, /Declared workerSecrets not set/);
+});
+
 test("single topology uploads the candidate rather than serving it", () => {
   // Candidate and release are the same Worker under single, so deploying on
   // merge would serve it and leave the release with nothing to promote.

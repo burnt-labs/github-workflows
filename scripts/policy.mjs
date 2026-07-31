@@ -105,6 +105,49 @@ export function validateDeploymentPolicy(policy) {
 
   const single = policy.topology === "single";
 
+  // GitHub Environment secret names to publish as Worker secrets before each
+  // deploy. This exists because developers do not have Cloudflare access, so
+  // `wrangler secret put` is not something they can run — GitHub is the only
+  // place they can hold a secret, and the deploy has to carry it across.
+  //
+  // An explicit allowlist rather than "forward everything": the deploy job can
+  // see every secret the caller inherits, which includes the Cloudflare API
+  // token itself. Forwarding by default would publish that token into the
+  // Worker.
+  if (policy.workerSecrets === undefined) {
+    policy.workerSecrets = [];
+  } else if (!Array.isArray(policy.workerSecrets)) {
+    throw new Error("deployment workerSecrets must be an array");
+  } else {
+    const seen = new Set();
+    for (const name of policy.workerSecrets) {
+      requireString(name, "deployment workerSecrets entry");
+      if (!/^[A-Z][A-Z0-9_]*$/.test(name)) {
+        throw new Error(
+          `deployment workerSecrets entry ${name} must be an uppercase environment-variable name`,
+        );
+      }
+      if (seen.has(name)) {
+        throw new Error(`deployment workerSecrets lists ${name} twice`);
+      }
+      seen.add(name);
+    }
+    // Naming either of these would publish the deployment credential into the
+    // Worker, where any code in it — or anyone who can read a binding — has it.
+    for (const reserved of [
+      "BURNT_CLOUDFLARE_API_TOKEN",
+      "BURNT_CLOUDFLARE_ACCOUNT_ID",
+      "CLOUDFLARE_API_TOKEN",
+      "CLOUDFLARE_ACCOUNT_ID",
+    ]) {
+      if (seen.has(reserved)) {
+        throw new Error(
+          `deployment workerSecrets must not include ${reserved}: that is the deployment credential`,
+        );
+      }
+    }
+  }
+
   // Normalized rather than read as an optional key, because a missing key
   // reaches workflow `if:` conditions as null, and GitHub casts both null and
   // false to 0 when comparing across types. Emitting an explicit boolean keeps

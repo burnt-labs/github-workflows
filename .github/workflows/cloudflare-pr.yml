@@ -3,10 +3,13 @@ name: Burnt Cloudflare PR
 on:
   workflow_call:
     secrets:
+      # Optional so a caller can use `secrets: inherit` instead, which is what
+      # publishing Worker secrets requires. cloudflare-version.yml resolves
+      # either form and fails loudly if neither is present.
       cloudflare-account-id:
-        required: true
+        required: false
       cloudflare-api-token:
-        required: true
+        required: false
 
 permissions:
   contents: read
@@ -43,9 +46,7 @@ jobs:
       deployment-policy: ${{ needs.quality.outputs.deployment-policy }}
       version-tag: ${{ needs.metadata.outputs.version-tag }}
       version-message: PR #${{ github.event.pull_request.number }} ${{ github.event.pull_request.html_url }}
-    secrets:
-      cloudflare-account-id: ${{ secrets.cloudflare-account-id }}
-      cloudflare-api-token: ${{ secrets.cloudflare-api-token }}
+    secrets: inherit
 
   publish-preview:
     needs: preview-candidate

@@ -1104,6 +1104,37 @@ function validateDeploymentPolicy(policy) {
   requireString(policy.workingDirectory, "deployment workingDirectory");
   requireString(policy.versionFile, "deployment versionFile");
   const single = policy.topology === "single";
+  if (policy.workerSecrets === void 0) {
+    policy.workerSecrets = [];
+  } else if (!Array.isArray(policy.workerSecrets)) {
+    throw new Error("deployment workerSecrets must be an array");
+  } else {
+    const seen = /* @__PURE__ */ new Set();
+    for (const name of policy.workerSecrets) {
+      requireString(name, "deployment workerSecrets entry");
+      if (!/^[A-Z][A-Z0-9_]*$/.test(name)) {
+        throw new Error(
+          `deployment workerSecrets entry ${name} must be an uppercase environment-variable name`,
+        );
+      }
+      if (seen.has(name)) {
+        throw new Error(`deployment workerSecrets lists ${name} twice`);
+      }
+      seen.add(name);
+    }
+    for (const reserved of [
+      "BURNT_CLOUDFLARE_API_TOKEN",
+      "BURNT_CLOUDFLARE_ACCOUNT_ID",
+      "CLOUDFLARE_API_TOKEN",
+      "CLOUDFLARE_ACCOUNT_ID",
+    ]) {
+      if (seen.has(reserved)) {
+        throw new Error(
+          `deployment workerSecrets must not include ${reserved}: that is the deployment credential`,
+        );
+      }
+    }
+  }
   if (policy.previewReleaseOnMain === void 0) {
     policy.previewReleaseOnMain = !single;
   } else if (typeof policy.previewReleaseOnMain !== "boolean") {

@@ -21,10 +21,13 @@ on:
         default: deploy
         type: string
     secrets:
+      # Optional so a caller can use `secrets: inherit` instead, which is what
+      # publishing Worker secrets requires. cloudflare-version.yml resolves
+      # either form and fails loudly if neither is present.
       cloudflare-account-id:
-        required: true
+        required: false
       cloudflare-api-token:
-        required: true
+        required: false
 
 permissions:
   contents: read
@@ -59,9 +62,7 @@ jobs:
       deployment-policy: ${{ needs.quality.outputs.deployment-policy }}
       version-tag: ${{ inputs.release-tag }}
       version-message: Release preview ${{ inputs.release-url }}
-    secrets:
-      cloudflare-account-id: ${{ secrets.cloudflare-account-id }}
-      cloudflare-api-token: ${{ secrets.cloudflare-api-token }}
+    secrets: inherit
 
   deploy-release:
     needs: quality
@@ -80,9 +81,7 @@ jobs:
       deployment-policy: ${{ needs.quality.outputs.deployment-policy }}
       version-tag: ${{ inputs.release-tag }}
       version-message: Release ${{ inputs.release-url }}
-    secrets:
-      cloudflare-account-id: ${{ secrets.cloudflare-account-id }}
-      cloudflare-api-token: ${{ secrets.cloudflare-api-token }}
+    secrets: inherit
 
   annotate-release:
     needs: deploy-release

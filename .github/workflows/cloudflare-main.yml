@@ -3,10 +3,13 @@ name: Burnt Cloudflare Main Promotion
 on:
   workflow_call:
     secrets:
+      # Optional so a caller can use `secrets: inherit` instead, which is what
+      # publishing Worker secrets requires. cloudflare-version.yml resolves
+      # either form and fails loudly if neither is present.
       cloudflare-account-id:
-        required: true
+        required: false
       cloudflare-api-token:
-        required: true
+        required: false
 
 permissions:
   contents: read
@@ -71,9 +74,7 @@ jobs:
       deployment-policy: ${{ needs.quality.outputs.deployment-policy }}
       version-tag: ${{ needs.metadata.outputs.candidate-tag }}
       version-message: RC ${{ needs.metadata.outputs.candidate-url }}
-    secrets:
-      cloudflare-account-id: ${{ secrets.cloudflare-account-id }}
-      cloudflare-api-token: ${{ secrets.cloudflare-api-token }}
+    secrets: inherit
 
   preview-release:
     needs: [quality, metadata, deploy-candidate]
@@ -89,9 +90,7 @@ jobs:
       deployment-policy: ${{ needs.quality.outputs.deployment-policy }}
       version-tag: ${{ needs.metadata.outputs.candidate-tag }}
       version-message: RC ${{ needs.metadata.outputs.candidate-url }}
-    secrets:
-      cloudflare-account-id: ${{ secrets.cloudflare-account-id }}
-      cloudflare-api-token: ${{ secrets.cloudflare-api-token }}
+    secrets: inherit
 
   create-releases:
     needs: [quality, metadata, deploy-candidate, preview-release]
@@ -172,9 +171,7 @@ jobs:
       deployment-policy: ${{ needs.quality.outputs.deployment-policy }}
       version-tag: ${{ needs.metadata.outputs.release-tag }}
       version-message: Release ${{ needs.create-releases.outputs.release-url }}
-    secrets:
-      cloudflare-account-id: ${{ secrets.cloudflare-account-id }}
-      cloudflare-api-token: ${{ secrets.cloudflare-api-token }}
+    secrets: inherit
 
   publish-automatic-release:
     needs: [metadata, deploy-release-automatic]

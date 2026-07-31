@@ -118,7 +118,64 @@ test("deployment accepts only exact topology environments", () => {
     assert.deepEqual(validateDeploymentPolicy(deploymentPolicy(topology)), {
       ...deploymentPolicy(topology),
       previewReleaseOnMain: true,
+      workerSecrets: [],
     });
+  }
+});
+
+test("workerSecrets defaults to none and accepts uppercase names", () => {
+  assert.deepEqual(
+    validateDeploymentPolicy(deploymentPolicy()).workerSecrets,
+    [],
+  );
+
+  const named = deploymentPolicy();
+  named.workerSecrets = ["API_KEY", "WEBHOOK_SECRET_2"];
+  assert.deepEqual(validateDeploymentPolicy(named).workerSecrets, [
+    "API_KEY",
+    "WEBHOOK_SECRET_2",
+  ]);
+});
+
+test("workerSecrets rejects malformed and duplicated names", () => {
+  for (const [name, pattern] of [
+    ["lowercase", /uppercase environment-variable name/],
+    ["1LEADING_DIGIT", /uppercase environment-variable name/],
+    ["HAS-HYPHEN", /uppercase environment-variable name/],
+    ["", /workerSecrets entry/],
+  ]) {
+    const policy = deploymentPolicy();
+    policy.workerSecrets = [name];
+    assert.throws(() => validateDeploymentPolicy(policy), pattern);
+  }
+
+  const duplicated = deploymentPolicy();
+  duplicated.workerSecrets = ["API_KEY", "API_KEY"];
+  assert.throws(
+    () => validateDeploymentPolicy(duplicated),
+    /lists API_KEY twice/,
+  );
+
+  const notArray = deploymentPolicy();
+  notArray.workerSecrets = "API_KEY";
+  assert.throws(() => validateDeploymentPolicy(notArray), /must be an array/);
+});
+
+test("workerSecrets cannot forward the deployment credential", () => {
+  // The publish step sees every secret the caller inherits. Naming the token
+  // here would write it into the Worker, where anything running in it has it.
+  for (const reserved of [
+    "BURNT_CLOUDFLARE_API_TOKEN",
+    "BURNT_CLOUDFLARE_ACCOUNT_ID",
+    "CLOUDFLARE_API_TOKEN",
+    "CLOUDFLARE_ACCOUNT_ID",
+  ]) {
+    const policy = deploymentPolicy();
+    policy.workerSecrets = [reserved];
+    assert.throws(
+      () => validateDeploymentPolicy(policy),
+      /that is the deployment credential/,
+    );
   }
 });
 
