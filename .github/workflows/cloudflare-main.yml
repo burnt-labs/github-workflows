@@ -159,7 +159,12 @@ jobs:
 
   deploy-release-automatic:
     needs: [quality, metadata, create-releases]
-    if: fromJSON(needs.quality.outputs.deployment-policy).promotionMode == 'automatic'
+    # create-releases deliberately tolerates a skipped preview-release. Keep
+    # that skipped ancestor from activating GitHub's implicit success() guard.
+    if: >-
+      !cancelled() &&
+      needs.create-releases.result == 'success' &&
+      fromJSON(needs.quality.outputs.deployment-policy).promotionMode == 'automatic'
     permissions:
       contents: read
       deployments: write

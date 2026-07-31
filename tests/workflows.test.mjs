@@ -139,7 +139,7 @@ test("Cloudflare promotion ordering is explicit", () => {
   ]);
   assert.equal(
     workflow.jobs["deploy-release-automatic"].if,
-    "fromJSON(needs.quality.outputs.deployment-policy).promotionMode == 'automatic'",
+    "!cancelled() && needs.create-releases.result == 'success' && fromJSON(needs.quality.outputs.deployment-policy).promotionMode == 'automatic'",
   );
 });
 
@@ -229,7 +229,7 @@ test("npm promotes next before latest", () => {
   ]);
   assert.equal(
     workflow.jobs["publish-release-automatic"].if,
-    "fromJSON(needs.quality.outputs.npm-policy).promotionMode == 'automatic'",
+    "!cancelled() && needs.create-releases.result == 'success' && fromJSON(needs.quality.outputs.npm-policy).promotionMode == 'automatic'",
   );
   assert.match(source, /candidateDistTag/);
   assert.match(source, /releaseDistTag/);

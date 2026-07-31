@@ -112,7 +112,10 @@ jobs:
 
   publish-release-automatic:
     needs: [quality, metadata, create-releases]
-    if: fromJSON(needs.quality.outputs.npm-policy).promotionMode == 'automatic'
+    if: >-
+      !cancelled() &&
+      needs.create-releases.result == 'success' &&
+      fromJSON(needs.quality.outputs.npm-policy).promotionMode == 'automatic'
     permissions:
       contents: read
       id-token: write
