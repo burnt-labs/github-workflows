@@ -40,6 +40,22 @@ function npmPolicy() {
   };
 }
 
+function singleDeploymentPolicy() {
+  const target = {
+    githubEnvironment: "production",
+    url: "https://worker.example.com",
+  };
+  return {
+    schemaVersion: 1,
+    topology: "single",
+    promotionMode: "manual",
+    workingDirectory: ".",
+    versionFile: "package.json",
+    packageManager: "pnpm",
+    targets: { candidate: { ...target }, release: { ...target } },
+  };
+}
+
 function deploymentPolicy(topology = "standard") {
   const environments =
     topology === "chain"
@@ -126,6 +142,67 @@ test("deployment normalizes previewReleaseOnMain to an explicit boolean", () => 
       /previewReleaseOnMain must be a boolean/,
     );
   }
+});
+
+test("single topology models one Worker with no wrangler environment", () => {
+  const validated = validateDeploymentPolicy(singleDeploymentPolicy());
+  assert.equal(validated.targets.candidate.wranglerEnv, undefined);
+  assert.equal(validated.targets.release.wranglerEnv, undefined);
+  assert.equal(validated.targets.candidate.githubEnvironment, "production");
+  assert.equal(validated.targets.release.githubEnvironment, "production");
+});
+
+test("single topology forbids naming a wrangler environment", () => {
+  // These repositories have no `env` block, and cloudflare-version.yml omits
+  // --env for this topology. Accepting the key would let a policy declare
+  // something the deploy silently ignores.
+  for (const role of ["candidate", "release"]) {
+    const policy = singleDeploymentPolicy();
+    policy.targets[role].wranglerEnv = "production";
+    assert.throws(
+      () => validateDeploymentPolicy(policy),
+      new RegExp(`single topology forbids targets\\.${role}\\.wranglerEnv`),
+    );
+  }
+});
+
+test("single topology fixes the GitHub Environment to production", () => {
+  const policy = singleDeploymentPolicy();
+  policy.targets.candidate.githubEnvironment = "staging";
+  assert.throws(
+    () => validateDeploymentPolicy(policy),
+    /single topology requires targets\.candidate\.githubEnvironment=production/,
+  );
+});
+
+test("single topology defaults previewReleaseOnMain to false and rejects true", () => {
+  // One Worker, and the main flow already uploads it as the candidate. A
+  // release preview would upload the same build to the same place twice.
+  assert.equal(
+    validateDeploymentPolicy(singleDeploymentPolicy()).previewReleaseOnMain,
+    false,
+  );
+
+  const explicit = singleDeploymentPolicy();
+  explicit.previewReleaseOnMain = true;
+  assert.throws(
+    () => validateDeploymentPolicy(explicit),
+    /single topology cannot set previewReleaseOnMain/,
+  );
+
+  // Explicit false stays false rather than being treated as an error.
+  const off = singleDeploymentPolicy();
+  off.previewReleaseOnMain = false;
+  assert.equal(validateDeploymentPolicy(off).previewReleaseOnMain, false);
+});
+
+test("single topology requires both roles to address the same Worker", () => {
+  const policy = singleDeploymentPolicy();
+  policy.targets.release.url = "https://elsewhere.example.com";
+  assert.throws(
+    () => validateDeploymentPolicy(policy),
+    /targets\.candidate\.url and targets\.release\.url to match/,
+  );
 });
 
 test("quality accepts an optional validate command", () => {

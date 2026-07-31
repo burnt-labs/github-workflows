@@ -80,7 +80,7 @@ A consumer must have `.github/quality-policy.jsonc`. It additionally needs
 ```jsonc
 {
   "schemaVersion": 1,
-  "topology": "chain", // "standard" or "chain"
+  "topology": "chain", // "standard", "chain", or "single"
   "promotionMode": "manual", // "manual" or "automatic"
   "packageManager": "pnpm", // "npm", "pnpm", or "yarn"
   "workingDirectory": ".", // passed to wrangler-action
@@ -106,6 +106,17 @@ Topology fixes the environment names. `standard` maps candidate to `staging`
 and release to `production`; `chain` maps them to `testnet` and `mainnet`.
 `githubEnvironment` must equal `wranglerEnv`, and neither may be `preview` or
 start with `preview-`.
+
+`single` is the third topology, for Workers with no wrangler `env` block. Both
+roles are the same Worker, so promotion splits by traffic rather than by
+environment: the main flow uploads the candidate at 0% and publishing a release
+deploys it. Its targets omit `wranglerEnv` entirely — there is no environment to
+name and `cloudflare-version.yml` drops `--env` — and both must declare
+`githubEnvironment: "production"` and an identical `url`. `previewReleaseOnMain`
+is rejected rather than defaulted, because a release preview would upload the
+same build to the same Worker twice. Note that this puts pull-request previews
+on the `production` GitHub Environment, inheriting its secrets and protection
+rules; that is the cost of modelling one environment honestly.
 
 ### npm-policy.jsonc
 
@@ -276,6 +287,14 @@ disable everything downstream while the run still reports success.
 as `null`, and `null` and `false` both cast to `0`. Optional booleans that a
 workflow reads must be normalized to an explicit value in `scripts/policy.mjs`,
 not left to default at the point of use. `previewReleaseOnMain` does this.
+
+**`&&` / `||` return an operand, not a boolean, and `''` is falsy.** So
+`cond && '' || other` evaluates to `other` for _every_ value of `cond` — the
+empty branch can never be selected. Any ternary whose intended result is an
+empty string must be written with the condition negated and `''` on the right:
+`!cond && other || ''`. `cloudflare-version.yml` builds its optional `--env`
+fragment this way, and a test asserts the shape, because the broken form fails
+only under `single` topology and only at deploy time.
 
 **Mutually exclusive conditions can select nothing.** If every branch is
 conditional and none matches, the run succeeds having done nothing. Guard the

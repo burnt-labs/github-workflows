@@ -59,7 +59,13 @@ jobs:
       deployments: write
     uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@d0a91f43145926ec7fb3253bf8ef6f01d5033a24
     with:
-      operation: deploy
+      # Under single topology the candidate and the release are the same
+      # Worker, so deploying here would serve the merge immediately and there
+      # would be nothing left for publishing a release to do. Upload the
+      # version at 0% traffic instead; the release deploy promotes it. For
+      # standard and chain the candidate is a separate environment and is
+      # deployed as before.
+      operation: ${{ fromJSON(needs.quality.outputs.deployment-policy).topology == 'single' && 'preview' || 'deploy' }}
       target: candidate
       quality-policy: ${{ needs.quality.outputs.quality-policy }}
       deployment-policy: ${{ needs.quality.outputs.deployment-policy }}
