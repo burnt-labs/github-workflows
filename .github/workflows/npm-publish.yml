@@ -42,8 +42,32 @@ jobs:
           node-version: lts/*
           registry-url: https://registry.npmjs.org
       - run: corepack enable
-      - name: Install npm with trusted publishing support
-        run: npm install --global npm@11
+      - name: Pin the npm CLI
+        # See "npm install-time security" in AGENTS.md. npm 12 is the floor for
+        # both halves of this flow: it enforces the install-time defaults, and
+        # it is well past the 11.5.1 that trusted publishing needs.
+        run: |
+          npm install --global npm@12
+          if [ "$(npm --version | cut -d. -f1)" != "12" ]; then
+            echo "::error::Expected npm 12 on PATH, found $(npm --version). Something is shadowing the pinned CLI."
+            exit 1
+          fi
+      - name: Verify trusted publishing credentials
+        # A caller that forgets `id-token: write` fails much later, inside
+        # `npm publish`, as an authentication error that reads like a registry
+        # problem. Say so here instead. The token check is the other half of the
+        # same contract: npm is retiring 2FA-bypass granular access tokens, so a
+        # token reaching this job is a credential that should not exist rather
+        # than a fallback worth taking.
+        run: |
+          if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+            echo "::error::No OIDC token available. The calling workflow must grant id-token: write."
+            exit 1
+          fi
+          if [ -n "${NODE_AUTH_TOKEN:-}" ] || [ -n "${NPM_TOKEN:-}" ]; then
+            echo "::error::An npm token is present. This flow publishes with trusted publishing and must not carry one."
+            exit 1
+          fi
       - name: Install
         run: ${{ fromJSON(inputs.quality-policy).commands.install }}
       - name: Set publish version without committing

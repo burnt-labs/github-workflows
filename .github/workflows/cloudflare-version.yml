@@ -92,6 +92,16 @@ jobs:
           node-version: lts/*
       - name: Enable Corepack
         run: corepack enable
+      - name: Pin the npm CLI
+        # See "npm install-time security" in AGENTS.md. This job runs the
+        # consumer's install alongside the Cloudflare API token, so it is the
+        # last place to want install semantics that change on their own.
+        run: |
+          npm install --global npm@12
+          if [ "$(npm --version | cut -d. -f1)" != "12" ]; then
+            echo "::error::Expected npm 12 on PATH, found $(npm --version). Something is shadowing the pinned CLI."
+            exit 1
+          fi
       - name: Install
         run: ${{ fromJSON(inputs.quality-policy).commands.install }}
       - name: Build

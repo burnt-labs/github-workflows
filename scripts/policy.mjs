@@ -6,6 +6,7 @@ import { parse, printParseErrorCode } from "jsonc-parser";
 const QUALITY_PATH = ".github/quality-policy.jsonc";
 const DEPLOYMENT_PATH = ".github/deployment-policy.jsonc";
 const NPM_PATH = ".github/npm-policy.jsonc";
+const PHALA_PATH = ".github/phala-policy.jsonc";
 const REQUIRED_COMMANDS = [
   "install",
   "lint",
@@ -259,10 +260,158 @@ export function validateNpmPolicy(policy) {
   return policy;
 }
 
+function validateEnvironmentNames(values, label, reserved = []) {
+  if (!Array.isArray(values)) {
+    throw new Error(`${label} must be an array`);
+  }
+  const seen = new Set();
+  for (const name of values) {
+    requireString(name, `${label} entry`);
+    if (!/^[A-Z][A-Z0-9_]*$/.test(name)) {
+      throw new Error(
+        `${label} entry ${name} must be an uppercase environment-variable name`,
+      );
+    }
+    if (seen.has(name)) {
+      throw new Error(`${label} lists ${name} twice`);
+    }
+    if (reserved.includes(name)) {
+      throw new Error(`${label} must not include reserved name ${name}`);
+    }
+    seen.add(name);
+  }
+  return seen;
+}
+
+export function validatePhalaPolicy(policy) {
+  if (!policy || typeof policy !== "object" || Array.isArray(policy)) {
+    throw new Error("Phala policy must be an object");
+  }
+  if (policy.schemaVersion !== 1) {
+    throw new Error("Phala schemaVersion must equal 1");
+  }
+  requireString(policy.workingDirectory, "Phala workingDirectory");
+  requireString(policy.composeFile, "Phala composeFile");
+  requireString(policy.healthcheckPath, "Phala healthcheckPath");
+  if (!policy.healthcheckPath.startsWith("/")) {
+    throw new Error("Phala healthcheckPath must start with /");
+  }
+
+  if (!policy.image || typeof policy.image !== "object") {
+    throw new Error("Phala image must be an object");
+  }
+  for (const field of [
+    "context",
+    "dockerfile",
+    "name",
+    "composeVariable",
+    "registryUsername",
+  ]) {
+    requireString(policy.image[field], `Phala image.${field}`);
+  }
+  if (policy.image.registry !== "ghcr.io") {
+    throw new Error("Phala image.registry must equal ghcr.io");
+  }
+  const imageComponent = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
+  if (
+    !policy.image.name.split("/").every((part) => imageComponent.test(part))
+  ) {
+    throw new Error(
+      "Phala image.name must be a lowercase container image path",
+    );
+  }
+  if (!/^[A-Z][A-Z0-9_]*$/.test(policy.image.composeVariable)) {
+    throw new Error(
+      "Phala image.composeVariable must be an uppercase environment-variable name",
+    );
+  }
+
+  if (!policy.credentials || typeof policy.credentials !== "object") {
+    throw new Error("Phala credentials must be an object");
+  }
+  for (const field of ["phalaApiKeySecret", "registryPasswordSecret"]) {
+    requireString(policy.credentials[field], `Phala credentials.${field}`);
+    if (!/^[A-Z][A-Z0-9_]*$/.test(policy.credentials[field])) {
+      throw new Error(
+        `Phala credentials.${field} must be an uppercase environment-variable name`,
+      );
+    }
+  }
+  if (
+    policy.credentials.phalaApiKeySecret ===
+    policy.credentials.registryPasswordSecret
+  ) {
+    throw new Error("Phala credential secret names must differ");
+  }
+
+  const reserved = [
+    "GITHUB_TOKEN",
+    "DSTACK_DOCKER_REGISTRY",
+    "DSTACK_DOCKER_USERNAME",
+    "DSTACK_DOCKER_PASSWORD",
+    policy.image.composeVariable,
+    policy.credentials.phalaApiKeySecret,
+    policy.credentials.registryPasswordSecret,
+  ];
+  const secretNames = validateEnvironmentNames(
+    policy.runtimeSecrets,
+    "Phala runtimeSecrets",
+    reserved,
+  );
+  const variableNames = validateEnvironmentNames(
+    policy.runtimeVariables,
+    "Phala runtimeVariables",
+    reserved,
+  );
+  for (const name of secretNames) {
+    if (variableNames.has(name)) {
+      throw new Error(
+        `Phala environment name ${name} cannot be both a secret and a variable`,
+      );
+    }
+  }
+
+  for (const role of ["candidate", "release"]) {
+    const target = policy.targets?.[role];
+    if (!target || typeof target !== "object") {
+      throw new Error(`Phala targets.${role} must be an object`);
+    }
+    requireString(
+      target.githubEnvironment,
+      `Phala targets.${role}.githubEnvironment`,
+    );
+    requireString(target.cvmName, `Phala targets.${role}.cvmName`);
+    if (!/^[a-z](?!.*--)[a-z0-9-]{3,61}[a-z0-9]$/.test(target.cvmName)) {
+      throw new Error(
+        `Phala targets.${role}.cvmName must be 5-63 characters, start with a lowercase letter, end with a letter or digit, and contain no consecutive hyphens`,
+      );
+    }
+    const githubEnvironment = target.githubEnvironment.toLowerCase();
+    if (
+      githubEnvironment === "preview" ||
+      githubEnvironment.startsWith("preview-")
+    ) {
+      throw new Error("preview-specific GitHub Environments are forbidden");
+    }
+  }
+
+  if (
+    policy.environmentSecrets !== undefined ||
+    policy.environmentVariables !== undefined ||
+    policy.sync !== undefined
+  ) {
+    throw new Error(
+      "Phala policy uses runtimeSecrets/runtimeVariables; URL synchronization belongs in the caller",
+    );
+  }
+  return policy;
+}
+
 export function loadPolicies(
   root = process.cwd(),
   deploymentRequired = false,
   npmRequired = false,
+  phalaRequired = false,
 ) {
   const qualityFile = path.join(root, QUALITY_PATH);
   const quality = validateQualityPolicy(
@@ -282,7 +431,14 @@ export function loadPolicies(
       parseJsonc(fs.readFileSync(npmFile, "utf8"), npmFile),
     );
   }
-  return { quality, deployment, npm };
+  let phala;
+  const phalaFile = path.join(root, PHALA_PATH);
+  if (phalaRequired || fs.existsSync(phalaFile)) {
+    phala = validatePhalaPolicy(
+      parseJsonc(fs.readFileSync(phalaFile, "utf8"), phalaFile),
+    );
+  }
+  return { quality, deployment, npm, phala };
 }
 
 function writeOutput(name, value) {
@@ -295,10 +451,12 @@ function writeOutput(name, value) {
 export function runPolicy() {
   const deploymentRequired = process.argv.includes("--deployment");
   const npmRequired = process.argv.includes("--npm");
-  const { quality, deployment, npm } = loadPolicies(
+  const phalaRequired = process.argv.includes("--phala");
+  const { quality, deployment, npm, phala } = loadPolicies(
     process.env.POLICY_ROOT ?? process.cwd(),
     deploymentRequired,
     npmRequired,
+    phalaRequired,
   );
   writeOutput("quality", JSON.stringify(quality));
   if (deployment) {
@@ -308,5 +466,8 @@ export function runPolicy() {
   if (npm) {
     writeOutput("npm", JSON.stringify(npm));
     writeOutput("npm-promotion-mode", npm.promotionMode);
+  }
+  if (phala) {
+    writeOutput("phala", JSON.stringify(phala));
   }
 }

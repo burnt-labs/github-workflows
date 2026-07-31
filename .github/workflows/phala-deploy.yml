@@ -1,0 +1,218 @@
+name: Burnt Phala Deploy
+
+on:
+  workflow_call:
+    inputs:
+      target:
+        description: Semantic deployment target (candidate or release)
+        required: true
+        type: string
+    outputs:
+      deployment-url:
+        description: Public HTTPS endpoint reported by Phala
+        value: ${{ jobs.deploy.outputs.deployment-url }}
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate invocation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate target
+        if: ${{ !contains(fromJSON('["candidate","release"]'), inputs.target) }}
+        run: |
+          echo "::error::target must be candidate or release"
+          exit 1
+
+  policy:
+    name: Phala policy
+    needs: validate
+    runs-on: ubuntu-latest
+    outputs:
+      phala: ${{ steps.policy.outputs.phala }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Checkout central policy tools
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: burnt-labs/github-workflows
+          ref: 7b22e570359626013ba6c803b5d125f7568f0e54
+          path: .burnt-workflows
+      - id: policy
+        name: Require and validate Phala policy
+        run: node .burnt-workflows/scripts/policy.bundle.mjs --phala
+
+  quality:
+    needs: policy
+    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@7b22e570359626013ba6c803b5d125f7568f0e54 # v1.3.0
+
+  deploy:
+    name: Phala ${{ inputs.target }}
+    needs: [policy, quality]
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ fromJSON(needs.policy.outputs.phala).targets[inputs.target].githubEnvironment }}
+      url: ${{ steps.phala-url.outputs.deployment-url }}
+    concurrency:
+      group: phala-${{ github.repository }}-${{ fromJSON(needs.policy.outputs.phala).targets[inputs.target].cvmName }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      deployments: write
+      packages: write
+    outputs:
+      deployment-url: ${{ steps.phala-url.outputs.deployment-url }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: lts/*
+      - name: Resolve image
+        id: image
+        env:
+          IMAGE_NAME: ${{ fromJSON(needs.policy.outputs.phala).image.name }}
+        run: |
+          repository="$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
+          echo "image=ghcr.io/${repository}/${IMAGE_NAME}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+      - name: Collect deployment credentials and runtime configuration
+        env:
+          ALL_SECRETS: ${{ toJSON(secrets) }}
+          ALL_VARIABLES: ${{ toJSON(vars) }}
+          API_KEY_NAME: ${{ fromJSON(needs.policy.outputs.phala).credentials.phalaApiKeySecret }}
+          REGISTRY_PASSWORD_NAME: ${{ fromJSON(needs.policy.outputs.phala).credentials.registryPasswordSecret }}
+          SECRET_NAMES: ${{ toJSON(fromJSON(needs.policy.outputs.phala).runtimeSecrets) }}
+          VARIABLE_NAMES: ${{ toJSON(fromJSON(needs.policy.outputs.phala).runtimeVariables) }}
+          IMAGE_VARIABLE: ${{ fromJSON(needs.policy.outputs.phala).image.composeVariable }}
+          IMAGE: ${{ steps.image.outputs.image }}
+          REGISTRY_USERNAME: ${{ fromJSON(needs.policy.outputs.phala).image.registryUsername }}
+        run: |
+          node - <<'NODE'
+          const fs = require("node:fs");
+          const secrets = JSON.parse(process.env.ALL_SECRETS);
+          const variables = JSON.parse(process.env.ALL_VARIABLES);
+          const secretNames = JSON.parse(process.env.SECRET_NAMES);
+          const variableNames = JSON.parse(process.env.VARIABLE_NAMES);
+          const apiKey = secrets[process.env.API_KEY_NAME];
+          const registryPassword = secrets[process.env.REGISTRY_PASSWORD_NAME];
+          const missing = [
+            ...(!apiKey ? [process.env.API_KEY_NAME] : []),
+            ...(!registryPassword ? [process.env.REGISTRY_PASSWORD_NAME] : []),
+            ...secretNames.filter((name) => !secrets[name]),
+            ...variableNames.filter((name) => !variables[name]),
+          ];
+          if (missing.length) {
+            process.stderr.write(`::error::Declared Phala configuration not set: ${missing.join(" ")}\n`);
+            process.exit(1);
+          }
+          const environment = Object.fromEntries([
+            ...secretNames.map((name) => [name, secrets[name]]),
+            ...variableNames.map((name) => [name, variables[name]]),
+            [process.env.IMAGE_VARIABLE, process.env.IMAGE],
+            ["DSTACK_DOCKER_REGISTRY", "ghcr.io"],
+            ["DSTACK_DOCKER_USERNAME", process.env.REGISTRY_USERNAME],
+            ["DSTACK_DOCKER_PASSWORD", registryPassword],
+          ]);
+          const quote = (value) => `"${String(value)
+            .replaceAll("\\", "\\\\")
+            .replaceAll("\n", "\\n")
+            .replaceAll("\r", "\\r")
+            .replaceAll('"', '\\"')}"`;
+          fs.writeFileSync(`${process.env.RUNNER_TEMP}/phala-api-key`, apiKey, { mode: 0o600 });
+          fs.writeFileSync(
+            `${process.env.RUNNER_TEMP}/phala.env`,
+            Object.entries(environment).map(([key, value]) => `${key}=${quote(value)}`).join("\n") + "\n",
+            { mode: 0o600 },
+          );
+          NODE
+          case "$(npx --yes phala@1.1.20 --version)" in
+            v1.1.20 | v1.1.20+*) ;;
+            *)
+              echo "::error::Expected Phala CLI 1.1.20"
+              exit 1
+              ;;
+          esac
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@f7ce87c1d6bead3e36075b2ce75da1f6cc28aaca # v3.9.0
+      - name: Login to GHCR for push
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Build and push image
+        uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75 # v6.9.0
+        with:
+          context: ${{ fromJSON(needs.policy.outputs.phala).image.context }}
+          file: ${{ fromJSON(needs.policy.outputs.phala).image.dockerfile }}
+          push: true
+          tags: ${{ steps.image.outputs.image }}
+      - name: Deploy CVM
+        env:
+          CVM_NAME: ${{ fromJSON(needs.policy.outputs.phala).targets[inputs.target].cvmName }}
+          COMPOSE_FILE: ${{ fromJSON(needs.policy.outputs.phala).composeFile }}
+          WORKING_DIRECTORY: ${{ fromJSON(needs.policy.outputs.phala).workingDirectory }}
+        run: |
+          cd "$WORKING_DIRECTORY"
+          PHALA_API_KEY="$(<"$RUNNER_TEMP/phala-api-key")"
+          npx --yes phala@1.1.20 cvms list \
+            --search "$CVM_NAME" \
+            --page-size 100 \
+            --json \
+            --api-key "$PHALA_API_KEY" > "$RUNNER_TEMP/phala-cvms.json"
+          existing_count="$(jq --arg name "$CVM_NAME" '[.items[] | select(.name == $name)] | length' "$RUNNER_TEMP/phala-cvms.json")"
+          if [ "$existing_count" -gt 1 ]; then
+            echo "::error::More than one Phala CVM is named $CVM_NAME"
+            exit 1
+          elif [ "$existing_count" -eq 1 ]; then
+            existing_id="$(jq -r --arg name "$CVM_NAME" '.items[] | select(.name == $name) | .id // empty' "$RUNNER_TEMP/phala-cvms.json")"
+            if [ -z "$existing_id" ]; then
+              echo "::error::Existing Phala CVM $CVM_NAME has no id"
+              exit 1
+            fi
+            target=(--cvm-id "$existing_id")
+          else
+            target=(-n "$CVM_NAME")
+          fi
+          npx --yes phala@1.1.20 deploy \
+            -c "$COMPOSE_FILE" \
+            "${target[@]}" \
+            --wait \
+            --api-key "$PHALA_API_KEY" \
+            -e "$RUNNER_TEMP/phala.env"
+      - name: Resolve Phala public URL
+        id: phala-url
+        env:
+          CVM_NAME: ${{ fromJSON(needs.policy.outputs.phala).targets[inputs.target].cvmName }}
+        run: |
+          PHALA_API_KEY="$(<"$RUNNER_TEMP/phala-api-key")"
+          npx --yes phala@1.1.20 cvms get "$CVM_NAME" --json --api-key "$PHALA_API_KEY" > "$RUNNER_TEMP/phala-cvm.json"
+          deployment_url="$(jq -r '
+            [.endpoints[]?.app, .public_urls[]?.app, .publicUrls[]?.app, .public_url, .publicUrl]
+            | map(select(type == "string" and startswith("https://")))
+            | first // empty
+          ' "$RUNNER_TEMP/phala-cvm.json")"
+          if [ -z "$deployment_url" ]; then
+            echo "::error::Phala CVM metadata did not contain a public HTTPS URL"
+            exit 1
+          fi
+          echo "deployment-url=${deployment_url%/}" >> "$GITHUB_OUTPUT"
+      - name: Verify health
+        env:
+          DEPLOYMENT_URL: ${{ steps.phala-url.outputs.deployment-url }}
+          HEALTHCHECK_PATH: ${{ fromJSON(needs.policy.outputs.phala).healthcheckPath }}
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl --fail --show-error --silent "${DEPLOYMENT_URL}${HEALTHCHECK_PATH}" >/dev/null; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 30 ]; then
+              sleep 10
+            fi
+          done
+          echo "::error::Phala deployment health check failed after 30 attempts"
+          exit 1

@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   quality:
-    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@8ad57077de69850b11de82d286ae0cbb23f51aa5
+    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@7b22e570359626013ba6c803b5d125f7568f0e54 # v1.3.0
 
   pack:
     name: Package dry run
@@ -24,6 +24,14 @@ jobs:
           node-version: lts/*
           registry-url: https://registry.npmjs.org
       - run: corepack enable
+      - name: Pin the npm CLI
+        # See "npm install-time security" in AGENTS.md.
+        run: |
+          npm install --global npm@12
+          if [ "$(npm --version | cut -d. -f1)" != "12" ]; then
+            echo "::error::Expected npm 12 on PATH, found $(npm --version). Something is shadowing the pinned CLI."
+            exit 1
+          fi
       - name: Install
         run: ${{ fromJSON(needs.quality.outputs.quality-policy).commands.install }}
       - name: Build
