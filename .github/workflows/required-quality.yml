@@ -13,13 +13,13 @@ on:
         value: ${{ jobs.policy.outputs.deployment }}
       promotion-mode:
         description: Manual or automatic when deployment policy is present
-        value: ${{ jobs.policy.outputs.promotion-mode }}
+        value: ${{ jobs.policy.outputs['promotion-mode'] }}
       npm-policy:
         description: Validated npm policy when present
         value: ${{ jobs.policy.outputs.npm }}
       npm-promotion-mode:
         description: Manual or automatic when npm policy is present
-        value: ${{ jobs.policy.outputs.npm-promotion-mode }}
+        value: ${{ jobs.policy.outputs['npm-promotion-mode'] }}
 
 permissions:
   contents: read
@@ -31,9 +31,9 @@ jobs:
     outputs:
       quality: ${{ steps.policy.outputs.quality }}
       deployment: ${{ steps.policy.outputs.deployment }}
-      promotion-mode: ${{ steps.policy.outputs.promotion-mode }}
+      promotion-mode: ${{ steps.policy.outputs['promotion-mode'] }}
       npm: ${{ steps.policy.outputs.npm }}
-      npm-promotion-mode: ${{ steps.policy.outputs.npm-promotion-mode }}
+      npm-promotion-mode: ${{ steps.policy.outputs['npm-promotion-mode'] }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

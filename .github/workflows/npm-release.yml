@@ -37,7 +37,7 @@ jobs:
 
   publish-release:
     needs: [quality, metadata]
-    if: needs.quality.outputs.npm-promotion-mode == 'manual'
+    if: needs.quality.outputs['npm-promotion-mode'] == 'manual'
     permissions:
       contents: read
       id-token: write

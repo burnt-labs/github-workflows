@@ -112,7 +112,7 @@ jobs:
 
   publish-release-automatic:
     needs: [quality, metadata, create-releases]
-    if: needs.quality.outputs.npm-promotion-mode == 'automatic'
+    if: needs.quality.outputs['npm-promotion-mode'] == 'automatic'
     permissions:
       contents: read
       id-token: write
