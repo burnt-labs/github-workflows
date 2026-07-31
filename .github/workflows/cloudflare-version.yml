@@ -22,10 +22,22 @@ on:
         required: true
         type: string
     secrets:
+      # All four are optional and exactly one pair must arrive. A caller either
+      # maps the two hyphenated names, or passes `secrets: inherit` — which is
+      # what publishing Worker secrets requires, since inherited secrets keep
+      # their own names. The organization names are declared rather than just
+      # read: actionlint types `secrets` from this block, so an undeclared
+      # lookup is an error, and declaring them makes the fallback part of the
+      # contract instead of a hidden alternative. `Validate credentials` fails
+      # the run if neither pair resolves.
       cloudflare-account-id:
-        required: true
+        required: false
       cloudflare-api-token:
-        required: true
+        required: false
+      BURNT_CLOUDFLARE_ACCOUNT_ID:
+        required: false
+      BURNT_CLOUDFLARE_API_TOKEN:
+        required: false
     outputs:
       version-id:
         value: ${{ jobs.version.outputs.version-id }}
@@ -59,6 +71,19 @@ jobs:
         run: |
           echo "::error::Invalid operation or target"
           exit 1
+      - name: Validate credentials
+        # A caller passing `secrets: inherit` supplies these under the
+        # organization names instead of the mapped ones. Either is fine; neither
+        # is not. Without this, wrangler-action receives an empty token and
+        # fails somewhere less obvious.
+        env:
+          API_TOKEN: ${{ secrets.cloudflare-api-token || secrets.BURNT_CLOUDFLARE_API_TOKEN }}
+          ACCOUNT_ID: ${{ secrets.cloudflare-account-id || secrets.BURNT_CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -z "$API_TOKEN" ] || [ -z "$ACCOUNT_ID" ]; then
+            echo "::error::No Cloudflare credentials. Pass cloudflare-api-token and cloudflare-account-id, or use secrets: inherit with BURNT_CLOUDFLARE_API_TOKEN and BURNT_CLOUDFLARE_ACCOUNT_ID."
+            exit 1
+          fi
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Setup Node
@@ -71,12 +96,68 @@ jobs:
         run: ${{ fromJSON(inputs.quality-policy).commands.install }}
       - name: Build
         run: ${{ fromJSON(inputs.quality-policy).commands.build }}
+      # Developers do not have Cloudflare access, so `wrangler secret put` is not
+      # available to them and GitHub is the only place they can hold a secret.
+      # This carries the declared ones across.
+      #
+      # Deploy only, never preview. `wrangler secret bulk` creates a Worker
+      # version and deploys it immediately, so running it on a preview would
+      # serve an intermediate version — on a chain repository that means mainnet
+      # starts serving off a job whose entire purpose is to *not* serve. A
+      # preview therefore runs against whatever secrets are already on the
+      # Worker, which is the same thing it does for bindings.
+      #
+      # Two steps, deliberately. The first has the secrets but no Cloudflare
+      # credential and runs only jq from the runner image. The second has the
+      # credential but is SHA-pinned code. Neither has both a consumer-resolved
+      # binary and the token.
+      - name: Collect Worker secrets
+        id: worker-secrets
+        if: >-
+          inputs.operation == 'deploy' &&
+          fromJSON(inputs.deployment-policy).workerSecrets[0] != null
+        env:
+          # Everything the caller inherited, the Cloudflare token included, so
+          # the allowlist below is the whole safety property. The validator also
+          # rejects the credential names and GITHUB_TOKEN outright.
+          ALL_SECRETS: ${{ toJSON(secrets) }}
+          WANTED: ${{ toJSON(fromJSON(inputs.deployment-policy).workerSecrets) }}
+        run: |
+          missing=$(jq -rn --argjson all "$ALL_SECRETS" --argjson want "$WANTED" \
+            '$want | map(select(($all[.] // "") == "")) | join(" ")')
+          if [ -n "$missing" ]; then
+            echo "::error::Declared workerSecrets not set in this GitHub Environment: $missing"
+            exit 1
+          fi
+          jq -n --argjson all "$ALL_SECRETS" --argjson want "$WANTED" \
+            '$want | map({key: ., value: $all[.]}) | from_entries' > "$RUNNER_TEMP/worker-secrets.json"
+          echo "Publishing $(jq -r 'keys | join(", ")' "$RUNNER_TEMP/worker-secrets.json")"
+      - name: Publish Worker secrets
+        if: steps.worker-secrets.outcome == 'success'
+        # The same pinned action that performs the deploy. Running wrangler out
+        # of the consumer's node_modules instead would put a caller-resolved
+        # binary next to the deployment credential, and would also fail outright
+        # for a consumer that lets this action supply wrangler rather than
+        # depending on it directly.
+        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
+        with:
+          apiToken: ${{ secrets.cloudflare-api-token || secrets.BURNT_CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.cloudflare-account-id || secrets.BURNT_CLOUDFLARE_ACCOUNT_ID }}
+          # deployment-policy.workingDirectory, matching the deploy step below.
+          # wrangler resolves its configuration relative to the working
+          # directory, and a monorepo consumer whose quality and deployment
+          # directories differ would otherwise update a different Worker or none.
+          workingDirectory: ${{ fromJSON(inputs.deployment-policy).workingDirectory }}
+          packageManager: ${{ fromJSON(inputs.deployment-policy).packageManager }}
+          command: >-
+            secret bulk ${{ runner.temp }}/worker-secrets.json
+            ${{ fromJSON(inputs.deployment-policy).topology != 'single' && format('--env {0}', fromJSON(inputs.deployment-policy).targets[inputs.target].wranglerEnv) || '' }}
       - name: Upload or deploy Worker version
         id: wrangler
         uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
         with:
-          apiToken: ${{ secrets.cloudflare-api-token }}
-          accountId: ${{ secrets.cloudflare-account-id }}
+          apiToken: ${{ secrets.cloudflare-api-token || secrets.BURNT_CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.cloudflare-account-id || secrets.BURNT_CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: ${{ fromJSON(inputs.deployment-policy).workingDirectory }}
           packageManager: ${{ fromJSON(inputs.deployment-policy).packageManager }}
           # The --env fragment is written as `topology != 'single' && … || ''`

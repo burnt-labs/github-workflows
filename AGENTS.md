@@ -85,6 +85,9 @@ A consumer must have `.github/quality-policy.jsonc`. It additionally needs
   "packageManager": "pnpm", // "npm", "pnpm", or "yarn"
   "workingDirectory": ".", // passed to wrangler-action
   "versionFile": "package.json", // seeds versioning when no release tags exist
+  // Optional. GitHub Environment secret names published as Worker secrets
+  // before each deploy. See "Worker secrets" below.
+  "workerSecrets": ["STYTCH_SECRET"],
   // Optional, defaults to true. See "Where the release target is previewed".
   "previewReleaseOnMain": false,
   "targets": {
@@ -134,6 +137,67 @@ rules; that is the cost of modelling one environment honestly.
 
 Publishing uses npm trusted publishing through GitHub OIDC with provenance. It
 never accepts an npm token — do not add one.
+
+### Worker secrets
+
+Developers do not have Cloudflare access, so `wrangler secret put` is not
+something they can run and GitHub is the only place they can hold a secret. The
+deploy carries the declared ones across:
+
+```jsonc
+{
+  "workerSecrets": ["STYTCH_SECRET", "WEBHOOK_SIGNING_KEY"],
+}
+```
+
+Each name must exist as a secret on the target GitHub Environment. Before
+creating the version, `cloudflare-version.yml` collects them and runs
+`wrangler secret bulk`, so the version picks them up.
+
+**The allowlist is the entire safety property.** `toJSON(secrets)` in that step
+contains every secret the caller inherited, the Cloudflare API token included.
+Only names listed in the policy are forwarded, and the validator rejects the
+credential names outright so a policy cannot publish the token into the Worker.
+
+A declared name that is not set on the environment **fails the deploy**. It does
+not skip the secret and carry on — absent configuration that degrades quietly is
+how a Worker ends up running without a credential it needs and reporting
+success.
+
+**Secrets are published on deploy, never on preview.** `wrangler secret bulk`
+creates a Worker version and deploys it immediately, so running it on a preview
+would serve an intermediate version — on a `chain` repository that means mainnet
+starts serving from a job whose entire purpose is not to serve. A preview
+therefore runs against whatever secrets are already on the Worker, the same way
+it inherits its bindings. A brand-new secret is live from the first deploy that
+publishes it, not from the preview before it.
+
+**Removing a name from `workerSecrets` does not revoke it.** The list is an
+upsert, not a reconciliation: the deploy sets what it names and leaves
+everything else alone. A secret dropped from the policy stays on the Worker and
+stays readable by Worker code. Deleting instead would mean the workflow removing
+secrets it did not set, which is worse — plenty of Workers have secrets set
+outside this policy. Revoke deliberately with `wrangler secret delete`, and note
+that this needs Cloudflare access, which is the thing the rest of this section
+exists to avoid. Treat a removal as unfinished until someone with access has
+done it.
+
+Callers that use this must pass `secrets: inherit` rather than the two named
+secrets, because inherited secrets arrive under their own names. Both forms
+work: `cloudflare-version.yml` resolves `cloudflare-api-token` first and falls
+back to `BURNT_CLOUDFLARE_API_TOKEN`, and fails loudly if neither is present.
+
+```yaml
+jobs:
+  cloudflare:
+    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-pr.yml@<sha> # vX.Y.Z
+    secrets: inherit
+```
+
+Note what `inherit` widens: the deploy job can then see every secret the calling
+repository holds, not just the Cloudflare ones. That job already runs consumer
+code alongside the deployment credential, so this does not cross a new boundary
+— but it does enlarge what a compromised consumer build can reach.
 
 ## Wiring a consumer repository
 
