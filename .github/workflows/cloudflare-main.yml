@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   quality:
-    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@d0a91f43145926ec7fb3253bf8ef6f01d5033a24
+    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@77500b27ddeb8d45c6bedcf56369bc8156f3a5a7
 
   metadata:
     needs: quality
@@ -28,7 +28,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: burnt-labs/github-workflows
-          ref: d0a91f43145926ec7fb3253bf8ef6f01d5033a24
+          ref: 77500b27ddeb8d45c6bedcf56369bc8156f3a5a7
           path: .burnt-workflows
       - name: Read stable release tags
         env:
@@ -57,9 +57,15 @@ jobs:
     permissions:
       contents: read
       deployments: write
-    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@d0a91f43145926ec7fb3253bf8ef6f01d5033a24
+    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@77500b27ddeb8d45c6bedcf56369bc8156f3a5a7
     with:
-      operation: deploy
+      # Under single topology the candidate and the release are the same
+      # Worker, so deploying here would serve the merge immediately and there
+      # would be nothing left for publishing a release to do. Upload the
+      # version at 0% traffic instead; the release deploy promotes it. For
+      # standard and chain the candidate is a separate environment and is
+      # deployed as before.
+      operation: ${{ fromJSON(needs.quality.outputs.deployment-policy).topology == 'single' && 'preview' || 'deploy' }}
       target: candidate
       quality-policy: ${{ needs.quality.outputs.quality-policy }}
       deployment-policy: ${{ needs.quality.outputs.deployment-policy }}
@@ -75,7 +81,7 @@ jobs:
     permissions:
       contents: read
       deployments: write
-    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@d0a91f43145926ec7fb3253bf8ef6f01d5033a24
+    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@77500b27ddeb8d45c6bedcf56369bc8156f3a5a7
     with:
       operation: preview
       target: release
@@ -158,7 +164,7 @@ jobs:
     permissions:
       contents: read
       deployments: write
-    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@d0a91f43145926ec7fb3253bf8ef6f01d5033a24
+    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@77500b27ddeb8d45c6bedcf56369bc8156f3a5a7
     with:
       operation: deploy
       target: release

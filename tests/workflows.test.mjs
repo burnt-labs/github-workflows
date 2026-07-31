@@ -50,6 +50,31 @@ test("Cloudflare uses the caller target environment", () => {
   assert.doesNotMatch(source, /environment:\s*(preview|preview-)/);
 });
 
+test("the single-topology --env fragment cannot fall through", () => {
+  // GitHub's && / || return the last evaluated operand, and '' is falsy. So
+  // `topology == 'single' && '' || format('--env {0}', …)` returns the format
+  // every time — including for single, where passing --env fails the deploy.
+  // The condition must be written negated, with '' on the right.
+  const source = fs.readFileSync(`${directory}/cloudflare-version.yml`, "utf8");
+  const fragment = source
+    .split("\n")
+    .find((line) => line.includes("--env {0}"));
+  assert.ok(fragment, "expected a conditional --env fragment");
+  assert.match(fragment, /topology != 'single' &&/);
+  assert.doesNotMatch(fragment, /&& ''/);
+});
+
+test("single topology uploads the candidate rather than serving it", () => {
+  // Candidate and release are the same Worker under single, so deploying on
+  // merge would serve it and leave the release with nothing to promote.
+  const source = fs.readFileSync(`${directory}/cloudflare-main.yml`, "utf8");
+  const workflow = parse(source);
+  assert.match(
+    workflow.jobs["deploy-candidate"].with.operation,
+    /topology == 'single' && 'preview' \|\| 'deploy'/,
+  );
+});
+
 test("Cloudflare promotion ordering is explicit", () => {
   const source = fs.readFileSync(`${directory}/cloudflare-main.yml`, "utf8");
   const workflow = parse(source);

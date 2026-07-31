@@ -16,9 +16,13 @@ const REQUIRED_COMMANDS = [
   "build",
 ];
 const REQUIRED_COVERAGE_THRESHOLDS = ["lines", "functions", "branches"];
+// Role to GitHub Environment name. For standard and chain this is also the
+// wrangler environment name. `single` has no wrangler environment at all — see
+// validateDeploymentPolicy.
 const TOPOLOGIES = {
   standard: { candidate: "staging", release: "production" },
   chain: { candidate: "testnet", release: "mainnet" },
+  single: { candidate: "production", release: "production" },
 };
 
 function requireString(value, label) {
@@ -88,7 +92,7 @@ export function validateDeploymentPolicy(policy) {
     throw new Error("deployment schemaVersion must equal 1");
   }
   if (!(policy.topology in TOPOLOGIES)) {
-    throw new Error("deployment topology must be standard or chain");
+    throw new Error("deployment topology must be standard, chain, or single");
   }
   if (!["manual", "automatic"].includes(policy.promotionMode)) {
     throw new Error("promotionMode must be manual or automatic");
@@ -99,14 +103,26 @@ export function validateDeploymentPolicy(policy) {
   requireString(policy.workingDirectory, "deployment workingDirectory");
   requireString(policy.versionFile, "deployment versionFile");
 
+  const single = policy.topology === "single";
+
   // Normalized rather than read as an optional key, because a missing key
   // reaches workflow `if:` conditions as null, and GitHub casts both null and
   // false to 0 when comparing across types. Emitting an explicit boolean keeps
   // the condition unambiguous.
   if (policy.previewReleaseOnMain === undefined) {
-    policy.previewReleaseOnMain = true;
+    // Under single there is one Worker, and the main flow already uploads it as
+    // the candidate. A release preview would upload the same build to the same
+    // place a second time.
+    policy.previewReleaseOnMain = !single;
   } else if (typeof policy.previewReleaseOnMain !== "boolean") {
     throw new Error("deployment previewReleaseOnMain must be a boolean");
+  } else if (single && policy.previewReleaseOnMain) {
+    // Rejected rather than quietly corrected. Flipping a value the author wrote
+    // is the kind of silent divergence between declared and actual behaviour
+    // this schema exists to prevent.
+    throw new Error(
+      "single topology cannot set previewReleaseOnMain: candidate and release are the same Worker",
+    );
   }
 
   const expected = TOPOLOGIES[policy.topology];
@@ -115,25 +131,56 @@ export function validateDeploymentPolicy(policy) {
     if (!target || typeof target !== "object") {
       throw new Error(`deployment targets.${role} must be an object`);
     }
-    for (const field of ["wranglerEnv", "githubEnvironment", "url"]) {
+    for (const field of ["githubEnvironment", "url"]) {
       requireString(target[field], `deployment targets.${role}.${field}`);
     }
-    if (target.wranglerEnv !== expected[role]) {
-      throw new Error(
-        `${policy.topology} topology requires targets.${role}.wranglerEnv=${expected[role]}`,
+
+    if (single) {
+      // There is no wrangler environment to name. These repositories have no
+      // `env` block, and cloudflare-version.yml omits `--env` entirely for this
+      // topology — passing one would fail with "No environment found in
+      // configuration".
+      if (target.wranglerEnv !== undefined) {
+        throw new Error(
+          `single topology forbids targets.${role}.wranglerEnv: the Worker has no wrangler environment`,
+        );
+      }
+      if (target.githubEnvironment !== expected[role]) {
+        throw new Error(
+          `single topology requires targets.${role}.githubEnvironment=${expected[role]}`,
+        );
+      }
+    } else {
+      requireString(
+        target.wranglerEnv,
+        `deployment targets.${role}.wranglerEnv`,
       );
+      if (target.wranglerEnv !== expected[role]) {
+        throw new Error(
+          `${policy.topology} topology requires targets.${role}.wranglerEnv=${expected[role]}`,
+        );
+      }
+      if (target.githubEnvironment !== target.wranglerEnv) {
+        throw new Error(
+          `targets.${role}.githubEnvironment must equal wranglerEnv`,
+        );
+      }
     }
-    if (target.githubEnvironment !== target.wranglerEnv) {
-      throw new Error(
-        `targets.${role}.githubEnvironment must equal wranglerEnv`,
-      );
-    }
+
     if (
       target.githubEnvironment === "preview" ||
       target.githubEnvironment.startsWith("preview-")
     ) {
       throw new Error("preview-specific GitHub Environments are forbidden");
     }
+  }
+
+  // One Worker means one address. Divergent urls would put a wrong link in the
+  // GitHub deployment and the release notes.
+  if (single && policy.targets.candidate.url !== policy.targets.release.url) {
+    throw new Error(
+      "single topology requires targets.candidate.url and targets.release.url to match",
+    );
   }
   return policy;
 }

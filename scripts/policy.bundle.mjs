@@ -1027,6 +1027,7 @@ var REQUIRED_COVERAGE_THRESHOLDS = ["lines", "functions", "branches"];
 var TOPOLOGIES = {
   standard: { candidate: "staging", release: "production" },
   chain: { candidate: "testnet", release: "mainnet" },
+  single: { candidate: "production", release: "production" },
 };
 function requireString(value, label) {
   if (typeof value !== "string" || value.trim() === "") {
@@ -1092,7 +1093,7 @@ function validateDeploymentPolicy(policy) {
     throw new Error("deployment schemaVersion must equal 1");
   }
   if (!(policy.topology in TOPOLOGIES)) {
-    throw new Error("deployment topology must be standard or chain");
+    throw new Error("deployment topology must be standard, chain, or single");
   }
   if (!["manual", "automatic"].includes(policy.promotionMode)) {
     throw new Error("promotionMode must be manual or automatic");
@@ -1102,10 +1103,15 @@ function validateDeploymentPolicy(policy) {
   }
   requireString(policy.workingDirectory, "deployment workingDirectory");
   requireString(policy.versionFile, "deployment versionFile");
+  const single = policy.topology === "single";
   if (policy.previewReleaseOnMain === void 0) {
-    policy.previewReleaseOnMain = true;
+    policy.previewReleaseOnMain = !single;
   } else if (typeof policy.previewReleaseOnMain !== "boolean") {
     throw new Error("deployment previewReleaseOnMain must be a boolean");
+  } else if (single && policy.previewReleaseOnMain) {
+    throw new Error(
+      "single topology cannot set previewReleaseOnMain: candidate and release are the same Worker",
+    );
   }
   const expected = TOPOLOGIES[policy.topology];
   for (const role of ["candidate", "release"]) {
@@ -1113,18 +1119,35 @@ function validateDeploymentPolicy(policy) {
     if (!target || typeof target !== "object") {
       throw new Error(`deployment targets.${role} must be an object`);
     }
-    for (const field of ["wranglerEnv", "githubEnvironment", "url"]) {
+    for (const field of ["githubEnvironment", "url"]) {
       requireString(target[field], `deployment targets.${role}.${field}`);
     }
-    if (target.wranglerEnv !== expected[role]) {
-      throw new Error(
-        `${policy.topology} topology requires targets.${role}.wranglerEnv=${expected[role]}`,
+    if (single) {
+      if (target.wranglerEnv !== void 0) {
+        throw new Error(
+          `single topology forbids targets.${role}.wranglerEnv: the Worker has no wrangler environment`,
+        );
+      }
+      if (target.githubEnvironment !== expected[role]) {
+        throw new Error(
+          `single topology requires targets.${role}.githubEnvironment=${expected[role]}`,
+        );
+      }
+    } else {
+      requireString(
+        target.wranglerEnv,
+        `deployment targets.${role}.wranglerEnv`,
       );
-    }
-    if (target.githubEnvironment !== target.wranglerEnv) {
-      throw new Error(
-        `targets.${role}.githubEnvironment must equal wranglerEnv`,
-      );
+      if (target.wranglerEnv !== expected[role]) {
+        throw new Error(
+          `${policy.topology} topology requires targets.${role}.wranglerEnv=${expected[role]}`,
+        );
+      }
+      if (target.githubEnvironment !== target.wranglerEnv) {
+        throw new Error(
+          `targets.${role}.githubEnvironment must equal wranglerEnv`,
+        );
+      }
     }
     if (
       target.githubEnvironment === "preview" ||
@@ -1132,6 +1155,11 @@ function validateDeploymentPolicy(policy) {
     ) {
       throw new Error("preview-specific GitHub Environments are forbidden");
     }
+  }
+  if (single && policy.targets.candidate.url !== policy.targets.release.url) {
+    throw new Error(
+      "single topology requires targets.candidate.url and targets.release.url to match",
+    );
   }
   return policy;
 }

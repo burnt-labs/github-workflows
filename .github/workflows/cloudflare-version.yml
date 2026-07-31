@@ -79,9 +79,15 @@ jobs:
           accountId: ${{ secrets.cloudflare-account-id }}
           workingDirectory: ${{ fromJSON(inputs.deployment-policy).workingDirectory }}
           packageManager: ${{ fromJSON(inputs.deployment-policy).packageManager }}
+          # The --env fragment is written as `topology != 'single' && … || ''`
+          # and not `topology == 'single' && '' || …`. GitHub's && / || return
+          # the last evaluated operand, and an empty string is falsy — so the
+          # second form falls through to the right-hand side every time and
+          # would always pass --env. Under single topology there is no wrangler
+          # environment to name and passing one fails the deploy.
           command: >-
             ${{ inputs.operation == 'preview' && 'versions upload' || 'deploy' }}
-            --env ${{ fromJSON(inputs.deployment-policy).targets[inputs.target].wranglerEnv }}
+            ${{ fromJSON(inputs.deployment-policy).topology != 'single' && format('--env {0}', fromJSON(inputs.deployment-policy).targets[inputs.target].wranglerEnv) || '' }}
             --message "${{ inputs.version-message }}"
             --tag "${{ inputs.version-tag }}"
       - name: Extract Cloudflare metadata

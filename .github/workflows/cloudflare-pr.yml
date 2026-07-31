@@ -17,7 +17,7 @@ jobs:
       github.event_name != 'pull_request' ||
       (github.event.pull_request.draft == false &&
        github.event.pull_request.head.repo.fork == false)
-    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@d0a91f43145926ec7fb3253bf8ef6f01d5033a24
+    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@77500b27ddeb8d45c6bedcf56369bc8156f3a5a7
 
   metadata:
     needs: quality
@@ -35,7 +35,7 @@ jobs:
     permissions:
       contents: read
       deployments: write
-    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@d0a91f43145926ec7fb3253bf8ef6f01d5033a24
+    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@77500b27ddeb8d45c6bedcf56369bc8156f3a5a7
     with:
       operation: preview
       target: candidate

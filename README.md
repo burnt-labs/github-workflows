@@ -49,13 +49,65 @@ the key and the step is skipped.
 
 Deployment policy uses semantic `candidate` and `release` roles:
 
-| Topology   | Candidate | Release      |
-| ---------- | --------- | ------------ |
-| `standard` | `staging` | `production` |
-| `chain`    | `testnet` | `mainnet`    |
+| Topology   | Candidate    | Release      |
+| ---------- | ------------ | ------------ |
+| `standard` | `staging`    | `production` |
+| `chain`    | `testnet`    | `mainnet`    |
+| `single`   | `production` | `production` |
 
 Preview deployments use the actual target environment. `preview` and
 `preview-*` GitHub Environments are invalid.
+
+### The `single` topology
+
+For Workers that have no wrangler `env` block and no second environment to
+promote through. Rather than inventing a staging environment nobody deploys to,
+`single` keeps both roles on the one Worker and splits promotion by **traffic**
+instead of by environment:
+
+| Event                    | What happens                                |
+| ------------------------ | ------------------------------------------- |
+| Pull request to `main`   | `versions upload` — exists at 0% traffic    |
+| Push to `main`           | `versions upload` — the candidate, still 0% |
+| GitHub release published | `deploy` — this is what serves traffic      |
+
+Its policy names no `wranglerEnv`, because there is no wrangler environment to
+name — the deploy omits `--env` entirely. Both roles must declare
+`githubEnvironment: "production"` and the same `url`.
+
+```jsonc
+{
+  "schemaVersion": 1,
+  "topology": "single",
+  "promotionMode": "manual",
+  "packageManager": "pnpm",
+  "workingDirectory": ".",
+  "versionFile": "package.json",
+  "targets": {
+    "candidate": {
+      "githubEnvironment": "production",
+      "url": "https://worker.burnt.workers.dev",
+    },
+    "release": {
+      "githubEnvironment": "production",
+      "url": "https://worker.burnt.workers.dev",
+    },
+  },
+}
+```
+
+Two consequences to weigh before adopting it:
+
+- **Merging stops being live.** A merge to `main` no longer serves. Repositories
+  that want merge-to-live set `promotionMode: "automatic"`, which deploys and
+  publishes the release in the same run.
+- **Every preview runs against `production`.** There is only one GitHub
+  Environment, so pull-request previews and candidate uploads both use it —
+  they inherit its secrets and are subject to its protection rules.
+
+`previewReleaseOnMain` is rejected under `single`. There is one Worker and the
+main flow already uploads it, so a release preview would upload the same build
+to the same place twice.
 
 ### When the release target is previewed
 

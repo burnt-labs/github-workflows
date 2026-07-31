@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   quality:
-    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@d0a91f43145926ec7fb3253bf8ef6f01d5033a24
+    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@77500b27ddeb8d45c6bedcf56369bc8156f3a5a7
 
   metadata:
     needs: quality
@@ -41,7 +41,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: burnt-labs/github-workflows/.github/workflows/npm-publish.yml@d0a91f43145926ec7fb3253bf8ef6f01d5033a24
+    uses: burnt-labs/github-workflows/.github/workflows/npm-publish.yml@77500b27ddeb8d45c6bedcf56369bc8156f3a5a7
     with:
       quality-policy: ${{ needs.quality.outputs.quality-policy }}
       npm-policy: ${{ needs.quality.outputs.npm-policy }}
