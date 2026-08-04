@@ -62,8 +62,24 @@ jobs:
       deployment-policy-path: ${{ inputs.deployment-policy-path }}
       deployment-required: true
 
-  preview-release:
+  validate-release-tag:
+    name: Validate app release tag
     needs: quality
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_PREFIX: ${{ fromJSON(needs.quality.outputs.deployment-policy).releasePrefix }}
+      RELEASE_TAG: ${{ inputs.release-tag }}
+    steps:
+      - run: |
+          tag_prefix=""
+          if [ -n "$RELEASE_PREFIX" ]; then tag_prefix="${RELEASE_PREFIX}-"; fi
+          if [[ ! "$RELEASE_TAG" =~ ^${tag_prefix}v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]; then
+            echo "::error::release tag $RELEASE_TAG does not belong to ${RELEASE_PREFIX:-the default release namespace}"
+            exit 1
+          fi
+
+  preview-release:
+    needs: [quality, validate-release-tag]
     if: inputs.operation == 'preview'
     permissions:
       contents: read
@@ -79,7 +95,7 @@ jobs:
     secrets: inherit
 
   deploy-release:
-    needs: quality
+    needs: [quality, validate-release-tag]
     if: >-
       inputs.operation == 'deploy' &&
       inputs.prerelease == false &&

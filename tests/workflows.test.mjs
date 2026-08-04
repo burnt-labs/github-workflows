@@ -350,6 +350,24 @@ test("release rejects an unrecognized operation instead of skipping", () => {
   assert.deepEqual(workflow.jobs.quality.needs, "validate");
 });
 
+test("release rejects tags from another app namespace", () => {
+  const workflow = parse(
+    fs.readFileSync(`${directory}/cloudflare-release.yml`, "utf8"),
+  );
+  const guard = workflow.jobs["validate-release-tag"];
+  assert.equal(guard.needs, "quality");
+  assert.match(guard.env.RELEASE_PREFIX, /releasePrefix/);
+  assert.match(guard.steps[0].run, /does not belong/);
+  assert.deepEqual(workflow.jobs["preview-release"].needs, [
+    "quality",
+    "validate-release-tag",
+  ]);
+  assert.deepEqual(workflow.jobs["deploy-release"].needs, [
+    "quality",
+    "validate-release-tag",
+  ]);
+});
+
 test("release candidates cannot deploy the release target", () => {
   const source = fs.readFileSync(`${directory}/cloudflare-release.yml`, "utf8");
   assert.match(source, /inputs\.prerelease == false/);
