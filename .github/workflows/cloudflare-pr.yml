@@ -2,6 +2,17 @@ name: Burnt Cloudflare PR
 
 on:
   workflow_call:
+    inputs:
+      quality-policy-path:
+        description: Repository-relative quality policy JSONC path
+        required: false
+        default: .github/quality-policy.jsonc
+        type: string
+      deployment-policy-path:
+        description: Repository-relative deployment policy JSONC path
+        required: false
+        default: .github/deployment-policy.jsonc
+        type: string
     secrets:
       # Optional so a caller can use `secrets: inherit` instead, which is what
       # publishing Worker secrets requires. cloudflare-version.yml resolves
@@ -20,7 +31,11 @@ jobs:
       github.event_name != 'pull_request' ||
       (github.event.pull_request.draft == false &&
        github.event.pull_request.head.repo.full_name == github.repository)
-    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@7b22e570359626013ba6c803b5d125f7568f0e54 # v1.3.0
+    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@b76d8fb55323ea24956ee77b15719d34823dcb94 # v1.3.0
+    with:
+      quality-policy-path: ${{ inputs.quality-policy-path }}
+      deployment-policy-path: ${{ inputs.deployment-policy-path }}
+      deployment-required: true
 
   metadata:
     needs: quality
@@ -31,7 +46,10 @@ jobs:
       - id: tag
         env:
           PR_NUMBER: ${{ github.event.pull_request.number || github.run_number }}
-        run: echo "version-tag=pr-${PR_NUMBER}-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          RELEASE_PREFIX: ${{ fromJSON(needs.quality.outputs.deployment-policy).releasePrefix }}
+        run: |
+          if [ -n "$RELEASE_PREFIX" ]; then RELEASE_PREFIX="${RELEASE_PREFIX}-"; fi
+          echo "version-tag=${RELEASE_PREFIX}pr-${PR_NUMBER}-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
   preview-candidate:
     needs: [quality, metadata]
@@ -49,7 +67,7 @@ jobs:
     secrets: inherit
 
   publish-preview:
-    needs: preview-candidate
+    needs: [quality, preview-candidate]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -59,13 +77,18 @@ jobs:
       - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           PREVIEW_URL: ${{ needs.preview-candidate.outputs.deployment-url }}
+          RELEASE_PREFIX: ${{ fromJSON(needs.quality.outputs.deployment-policy).releasePrefix }}
           VERSION_ID: ${{ needs.preview-candidate.outputs.version-id }}
         with:
           script: |
-            const marker = `<!-- burnt-cloudflare-candidate -->`
+            const scope = process.env.RELEASE_PREFIX
+            const marker = scope
+              ? `<!-- burnt-cloudflare-candidate:${scope} -->`
+              : `<!-- burnt-cloudflare-candidate -->`
+            const heading = scope ? `${scope} candidate preview` : `Candidate preview`
             const body = [
               marker,
-              `### Candidate preview`,
+              `### ${heading}`,
               `- Preview: ${process.env.PREVIEW_URL}`,
               `- Cloudflare version: \`${process.env.VERSION_ID}\``,
               `- Commit: \`${context.sha}\``,

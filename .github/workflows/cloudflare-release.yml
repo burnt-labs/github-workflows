@@ -3,6 +3,16 @@ name: Burnt Cloudflare Release
 on:
   workflow_call:
     inputs:
+      quality-policy-path:
+        description: Repository-relative quality policy JSONC path
+        required: false
+        default: .github/quality-policy.jsonc
+        type: string
+      deployment-policy-path:
+        description: Repository-relative deployment policy JSONC path
+        required: false
+        default: .github/deployment-policy.jsonc
+        type: string
       release-tag:
         required: true
         type: string
@@ -46,7 +56,11 @@ jobs:
 
   quality:
     needs: validate
-    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@7b22e570359626013ba6c803b5d125f7568f0e54 # v1.3.0
+    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@b76d8fb55323ea24956ee77b15719d34823dcb94 # v1.3.0
+    with:
+      quality-policy-path: ${{ inputs.quality-policy-path }}
+      deployment-policy-path: ${{ inputs.deployment-policy-path }}
+      deployment-required: true
 
   preview-release:
     needs: quality

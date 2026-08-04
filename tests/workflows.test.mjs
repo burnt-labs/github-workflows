@@ -94,6 +94,47 @@ test("Cloudflare PRs allow same-repository branches when the repository is a for
   assert.doesNotMatch(workflow.jobs.quality.if, /head\.repo\.fork/);
 });
 
+test("Cloudflare entrypoints forward app-scoped policy paths", () => {
+  for (const name of [
+    "cloudflare-pr.yml",
+    "cloudflare-main.yml",
+    "cloudflare-release.yml",
+  ]) {
+    const workflow = parse(fs.readFileSync(`${directory}/${name}`, "utf8"));
+    assert.equal(
+      workflow.on.workflow_call.inputs["quality-policy-path"].default,
+      ".github/quality-policy.jsonc",
+      name,
+    );
+    assert.equal(
+      workflow.on.workflow_call.inputs["deployment-policy-path"].default,
+      ".github/deployment-policy.jsonc",
+      name,
+    );
+    assert.match(
+      workflow.jobs.quality.with["quality-policy-path"],
+      /inputs\.quality-policy-path/,
+      name,
+    );
+    assert.match(
+      workflow.jobs.quality.with["deployment-policy-path"],
+      /inputs\.deployment-policy-path/,
+      name,
+    );
+    assert.equal(workflow.jobs.quality.with["deployment-required"], true, name);
+  }
+});
+
+test("Cloudflare release and preview metadata is app-scoped", () => {
+  const main = fs.readFileSync(`${directory}/cloudflare-main.yml`, "utf8");
+  assert.match(main, /RELEASE_PREFIX:.*releasePrefix/);
+
+  const pullRequest = fs.readFileSync(`${directory}/cloudflare-pr.yml`, "utf8");
+  assert.match(pullRequest, /RELEASE_PREFIX:.*releasePrefix/);
+  assert.match(pullRequest, /burnt-cloudflare-candidate:\$\{scope\}/);
+  assert.match(pullRequest, /\$\{RELEASE_PREFIX\}pr-/);
+});
+
 test("Phala deploys to the caller's selected real environment", () => {
   const source = fs.readFileSync(`${directory}/phala-deploy.yml`, "utf8");
   assert.match(source, /targets\[inputs\.target\]\.githubEnvironment/);

@@ -2,6 +2,17 @@ name: Burnt Cloudflare Main Promotion
 
 on:
   workflow_call:
+    inputs:
+      quality-policy-path:
+        description: Repository-relative quality policy JSONC path
+        required: false
+        default: .github/quality-policy.jsonc
+        type: string
+      deployment-policy-path:
+        description: Repository-relative deployment policy JSONC path
+        required: false
+        default: .github/deployment-policy.jsonc
+        type: string
     secrets:
       # Optional so a caller can use `secrets: inherit` instead, which is what
       # publishing Worker secrets requires. cloudflare-version.yml resolves
@@ -16,7 +27,11 @@ permissions:
 
 jobs:
   quality:
-    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@7b22e570359626013ba6c803b5d125f7568f0e54 # v1.3.0
+    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@b76d8fb55323ea24956ee77b15719d34823dcb94 # v1.3.0
+    with:
+      quality-policy-path: ${{ inputs.quality-policy-path }}
+      deployment-policy-path: ${{ inputs.deployment-policy-path }}
+      deployment-required: true
 
   metadata:
     needs: quality
@@ -31,7 +46,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: burnt-labs/github-workflows
-          ref: 7b22e570359626013ba6c803b5d125f7568f0e54
+          ref: b76d8fb55323ea24956ee77b15719d34823dcb94 # v1.3.0
           path: .burnt-workflows
       - name: Read stable release tags
         env:
@@ -43,6 +58,7 @@ jobs:
       - id: metadata
         env:
           GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          RELEASE_PREFIX: ${{ fromJSON(needs.quality.outputs.deployment-policy).releasePrefix }}
           VERSION_FILE: ${{ fromJSON(needs.quality.outputs.deployment-policy).versionFile }}
         run: |
           RELEASE_TAGS="$(cat "$RUNNER_TEMP/release-tags.txt")" \
