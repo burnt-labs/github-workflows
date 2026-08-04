@@ -27,7 +27,7 @@ permissions:
 
 jobs:
   quality:
-    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@b76d8fb55323ea24956ee77b15719d34823dcb94 # v1.3.0
+    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@c3fb3c74917eaede1f4e57dd2b16bd2b6f62c5fb # v1.3.0
     with:
       quality-policy-path: ${{ inputs.quality-policy-path }}
       deployment-policy-path: ${{ inputs.deployment-policy-path }}
@@ -46,7 +46,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: burnt-labs/github-workflows
-          ref: b76d8fb55323ea24956ee77b15719d34823dcb94 # v1.3.0
+          ref: c3fb3c74917eaede1f4e57dd2b16bd2b6f62c5fb # v1.3.0
           path: .burnt-workflows
       - name: Read stable release tags
         env:

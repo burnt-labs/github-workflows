@@ -31,7 +31,7 @@ jobs:
       github.event_name != 'pull_request' ||
       (github.event.pull_request.draft == false &&
        github.event.pull_request.head.repo.full_name == github.repository)
-    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@b76d8fb55323ea24956ee77b15719d34823dcb94 # v1.3.0
+    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@c3fb3c74917eaede1f4e57dd2b16bd2b6f62c5fb # v1.3.0
     with:
       quality-policy-path: ${{ inputs.quality-policy-path }}
       deployment-policy-path: ${{ inputs.deployment-policy-path }}
