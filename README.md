@@ -15,6 +15,10 @@ Consumers define:
 - `.github/npm-policy.jsonc` for npm packages
 - `.github/phala-policy.jsonc` for Phala CVM deployments
 
+Monorepos may keep one policy set per app and pass repository-relative policy
+paths to the reusable workflows. Cloudflare deployment policies can declare a
+lowercase `releasePrefix` so each app has an independent release history.
+
 Quality policy commands are mandatory and independently run: install, lint,
 Prettier, type-check, tests, coverage, and build. Each repository also owns
 integer `coverageThresholds` for `lines`, `functions`, and `branches` from 0 to 100. The repository's coverage command must enforce those declared values;

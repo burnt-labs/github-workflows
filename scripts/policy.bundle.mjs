@@ -1030,6 +1030,23 @@ var TOPOLOGIES = {
   chain: { candidate: "testnet", release: "mainnet" },
   single: { candidate: "production", release: "production" },
 };
+function resolvePolicyPath(root, configuredPath, defaultPath, label) {
+  const relativePath = configuredPath || defaultPath;
+  requireString(relativePath, label);
+  if (path.isAbsolute(relativePath)) {
+    throw new Error(`${label} must be relative to the repository root`);
+  }
+  const resolvedRoot = path.resolve(root);
+  const resolvedPath = path.resolve(resolvedRoot, relativePath);
+  const relativeToRoot = path.relative(resolvedRoot, resolvedPath);
+  if (relativeToRoot === ".." || relativeToRoot.startsWith(`..${path.sep}`)) {
+    throw new Error(`${label} must stay inside the repository root`);
+  }
+  if (path.extname(resolvedPath) !== ".jsonc") {
+    throw new Error(`${label} must name a .jsonc file`);
+  }
+  return resolvedPath;
+}
 function requireString(value, label) {
   if (typeof value !== "string" || value.trim() === "") {
     throw new Error(`${label} must be a non-empty string`);
@@ -1104,6 +1121,16 @@ function validateDeploymentPolicy(policy) {
   }
   requireString(policy.workingDirectory, "deployment workingDirectory");
   requireString(policy.versionFile, "deployment versionFile");
+  if (policy.releasePrefix === void 0) {
+    policy.releasePrefix = "";
+  } else if (
+    typeof policy.releasePrefix !== "string" ||
+    !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(policy.releasePrefix)
+  ) {
+    throw new Error(
+      "deployment releasePrefix must be a lowercase letters-and-numbers slug",
+    );
+  }
   const single = policy.topology === "single";
   if (policy.workerSecrets === void 0) {
     policy.workerSecrets = [];
@@ -1366,27 +1393,48 @@ function loadPolicies(
   deploymentRequired = false,
   npmRequired = false,
   phalaRequired = false,
+  policyPaths = {},
 ) {
-  const qualityFile = path.join(root, QUALITY_PATH);
+  const qualityFile = resolvePolicyPath(
+    root,
+    policyPaths.quality,
+    QUALITY_PATH,
+    "quality policy path",
+  );
   const quality = validateQualityPolicy(
     parseJsonc(fs.readFileSync(qualityFile, "utf8"), qualityFile),
   );
   let deployment;
-  const deploymentFile = path.join(root, DEPLOYMENT_PATH);
+  const deploymentFile = resolvePolicyPath(
+    root,
+    policyPaths.deployment,
+    DEPLOYMENT_PATH,
+    "deployment policy path",
+  );
   if (deploymentRequired || fs.existsSync(deploymentFile)) {
     deployment = validateDeploymentPolicy(
       parseJsonc(fs.readFileSync(deploymentFile, "utf8"), deploymentFile),
     );
   }
   let npm;
-  const npmFile = path.join(root, NPM_PATH);
+  const npmFile = resolvePolicyPath(
+    root,
+    policyPaths.npm,
+    NPM_PATH,
+    "npm policy path",
+  );
   if (npmRequired || fs.existsSync(npmFile)) {
     npm = validateNpmPolicy(
       parseJsonc(fs.readFileSync(npmFile, "utf8"), npmFile),
     );
   }
   let phala;
-  const phalaFile = path.join(root, PHALA_PATH);
+  const phalaFile = resolvePolicyPath(
+    root,
+    policyPaths.phala,
+    PHALA_PATH,
+    "Phala policy path",
+  );
   if (phalaRequired || fs.existsSync(phalaFile)) {
     phala = validatePhalaPolicy(
       parseJsonc(fs.readFileSync(phalaFile, "utf8"), phalaFile),
@@ -1413,6 +1461,12 @@ function runPolicy() {
     deploymentRequired,
     npmRequired,
     phalaRequired,
+    {
+      quality: process.env.QUALITY_POLICY_PATH,
+      deployment: process.env.DEPLOYMENT_POLICY_PATH,
+      npm: process.env.NPM_POLICY_PATH,
+      phala: process.env.PHALA_POLICY_PATH,
+    },
   );
   writeOutput("quality", JSON.stringify(quality));
   if (deployment) {

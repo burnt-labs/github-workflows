@@ -52,6 +52,9 @@ A consumer must have `.github/quality-policy.jsonc`. It additionally needs
 `.github/npm-policy.jsonc` for npm flows, or `.github/phala-policy.jsonc` for
 Phala flows. All are validated by
 `scripts/policy.mjs`; an invalid policy fails the run before anything executes.
+Reusable workflow callers may select alternate repository-relative `.jsonc`
+paths through the `quality-policy-path` and product-specific policy-path inputs.
+This is intended for monorepos; omitted inputs retain the root paths above.
 
 ### phala-policy.jsonc
 
@@ -148,6 +151,9 @@ caller job that consumes this output.
   "packageManager": "pnpm", // "npm", "pnpm", or "yarn"
   "workingDirectory": ".", // passed to wrangler-action
   "versionFile": "package.json", // seeds versioning when no release tags exist
+  // Optional lowercase slug. Namespaces release tags in a monorepo, for example
+  // "web" produces "web-v1.2.3". Omit for the existing "v1.2.3" format.
+  "releasePrefix": "web",
   // Optional. GitHub Environment secret names published as Worker secrets
   // before each deploy. See "Worker secrets" below.
   "workerSecrets": ["STYTCH_SECRET"],
