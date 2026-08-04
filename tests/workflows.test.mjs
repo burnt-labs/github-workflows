@@ -41,6 +41,25 @@ test("every internal workflow pin carries release metadata", () => {
   }
 });
 
+test("release metadata consumers use the same pinned script revision", () => {
+  const refs = ["cloudflare-main.yml", "npm-main.yml"].map((name) => {
+    const workflow = parse(fs.readFileSync(`${directory}/${name}`, "utf8"));
+    const checkout = workflow.jobs.metadata.steps.find(
+      (step) =>
+        step.with?.repository === "burnt-labs/github-workflows" &&
+        step.with?.path === ".burnt-workflows",
+    );
+    assert.ok(checkout, `${name} must check out release metadata scripts`);
+    assert.match(checkout.with.ref, /^[0-9a-f]{40}$/, name);
+    return checkout.with.ref;
+  });
+  assert.equal(
+    new Set(refs).size,
+    1,
+    `release metadata workflows disagree on the script revision: ${refs.join(", ")}`,
+  );
+});
+
 test("required quality supports ruleset events without filters", () => {
   const source = fs.readFileSync(`${directory}/required-quality.yml`, "utf8");
   const workflow = parse(source);
