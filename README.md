@@ -54,11 +54,11 @@ the key and the step is skipped.
 
 Deployment policy uses semantic `candidate` and `release` roles:
 
-| Topology   | Candidate    | Release      |
-| ---------- | ------------ | ------------ |
-| `standard` | `staging`    | `production` |
-| `chain`    | `testnet`    | `mainnet`    |
-| `single`   | `production` | `production` |
+| Topology   | Candidate   | Release      |
+| ---------- | ----------- | ------------ |
+| `standard` | `staging`   | `production` |
+| `chain`    | `testnet`   | `mainnet`    |
+| `single`   | same target | same target  |
 
 Preview deployments use the actual target environment. `preview` and
 `preview-*` GitHub Environments are invalid.
@@ -77,8 +77,8 @@ instead of by environment:
 | GitHub release published | `deploy` — this is what serves traffic      |
 
 Its policy names no `wranglerEnv`, because there is no wrangler environment to
-name — the deploy omits `--env` entirely. Both roles must declare
-`githubEnvironment: "production"` and the same `url`.
+name — the deploy omits `--env` entirely. Both roles must declare the same real
+`githubEnvironment` and the same `url`.
 
 ```jsonc
 {

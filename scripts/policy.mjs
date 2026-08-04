@@ -23,7 +23,7 @@ const REQUIRED_COVERAGE_THRESHOLDS = ["lines", "functions", "branches"];
 const TOPOLOGIES = {
   standard: { candidate: "staging", release: "production" },
   chain: { candidate: "testnet", release: "mainnet" },
-  single: { candidate: "production", release: "production" },
+  single: null,
 };
 
 function resolvePolicyPath(root, configuredPath, defaultPath, label) {
@@ -125,10 +125,11 @@ export function validateDeploymentPolicy(policy) {
     policy.releasePrefix = "";
   } else if (
     typeof policy.releasePrefix !== "string" ||
-    !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(policy.releasePrefix)
+    (policy.releasePrefix !== "" &&
+      !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(policy.releasePrefix))
   ) {
     throw new Error(
-      "deployment releasePrefix must be a lowercase letters-and-numbers slug",
+      "deployment releasePrefix must be empty or a lowercase letters-and-numbers slug",
     );
   }
 
@@ -222,11 +223,6 @@ export function validateDeploymentPolicy(policy) {
           `single topology forbids targets.${role}.wranglerEnv: the Worker has no wrangler environment`,
         );
       }
-      if (target.githubEnvironment !== expected[role]) {
-        throw new Error(
-          `single topology requires targets.${role}.githubEnvironment=${expected[role]}`,
-        );
-      }
     } else {
       requireString(
         target.wranglerEnv,
@@ -257,6 +253,15 @@ export function validateDeploymentPolicy(policy) {
   if (single && policy.targets.candidate.url !== policy.targets.release.url) {
     throw new Error(
       "single topology requires targets.candidate.url and targets.release.url to match",
+    );
+  }
+  if (
+    single &&
+    policy.targets.candidate.githubEnvironment !==
+      policy.targets.release.githubEnvironment
+  ) {
+    throw new Error(
+      "single topology requires targets.candidate.githubEnvironment and targets.release.githubEnvironment to match",
     );
   }
   return policy;

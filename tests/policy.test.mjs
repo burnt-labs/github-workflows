@@ -164,12 +164,12 @@ test("deployment accepts a monorepo release prefix", () => {
   policy.releasePrefix = "screening";
   assert.equal(validateDeploymentPolicy(policy).releasePrefix, "screening");
 
-  for (const invalid of ["Screening", "screening_site", "-screening", ""]) {
+  for (const invalid of ["Screening", "screening_site", "-screening"]) {
     const malformed = deploymentPolicy();
     malformed.releasePrefix = invalid;
     assert.throws(
       () => validateDeploymentPolicy(malformed),
-      /releasePrefix must be a lowercase letters-and-numbers slug/,
+      /releasePrefix must be empty or a lowercase letters-and-numbers slug/,
     );
   }
 });
@@ -314,12 +314,17 @@ test("single topology forbids naming a wrangler environment", () => {
   }
 });
 
-test("single topology fixes the GitHub Environment to production", () => {
+test("single topology uses one real GitHub Environment for both roles", () => {
   const policy = singleDeploymentPolicy();
-  policy.targets.candidate.githubEnvironment = "staging";
+  policy.targets.candidate.githubEnvironment = "prod-screening";
+  policy.targets.release.githubEnvironment = "prod-screening";
+  const validated = validateDeploymentPolicy(policy);
+  assert.equal(validated.targets.candidate.githubEnvironment, "prod-screening");
+
+  policy.targets.release.githubEnvironment = "another-environment";
   assert.throws(
     () => validateDeploymentPolicy(policy),
-    /single topology requires targets\.candidate\.githubEnvironment=production/,
+    /targets\.candidate\.githubEnvironment and targets\.release\.githubEnvironment to match/,
   );
 });
 
