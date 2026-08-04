@@ -56,6 +56,28 @@ test("required quality supports ruleset events without filters", () => {
   }
 });
 
+test("required quality accepts app-scoped policy paths", () => {
+  const source = fs.readFileSync(`${directory}/required-quality.yml`, "utf8");
+  const workflow = parse(source);
+  const inputs = workflow.on.workflow_call.inputs;
+  assert.equal(
+    inputs["quality-policy-path"].default,
+    ".github/quality-policy.jsonc",
+  );
+  assert.equal(
+    inputs["deployment-policy-path"].default,
+    ".github/deployment-policy.jsonc",
+  );
+  assert.equal(inputs["deployment-required"].default, false);
+
+  const policyStep = workflow.jobs.policy.steps.find(
+    (step) => step.id === "policy",
+  );
+  assert.match(policyStep.env.QUALITY_POLICY_PATH, /quality-policy-path/);
+  assert.match(policyStep.env.DEPLOYMENT_POLICY_PATH, /deployment-policy-path/);
+  assert.match(policyStep.run, /--deployment/);
+});
+
 test("Cloudflare uses the caller target environment", () => {
   const source = fs.readFileSync(`${directory}/cloudflare-version.yml`, "utf8");
   assert.match(source, /targets\[inputs\.target\]\.githubEnvironment/);
