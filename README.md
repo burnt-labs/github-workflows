@@ -15,6 +15,10 @@ Consumers define:
 - `.github/npm-policy.jsonc` for npm packages
 - `.github/phala-policy.jsonc` for Phala CVM deployments
 
+Monorepos may keep one policy set per app and pass repository-relative policy
+paths to the reusable workflows. Cloudflare deployment policies can declare a
+lowercase `releasePrefix` so each app has an independent release history.
+
 Quality policy commands are mandatory and independently run: install, lint,
 Prettier, type-check, tests, coverage, and build. Each repository also owns
 integer `coverageThresholds` for `lines`, `functions`, and `branches` from 0 to 100. The repository's coverage command must enforce those declared values;
@@ -50,11 +54,11 @@ the key and the step is skipped.
 
 Deployment policy uses semantic `candidate` and `release` roles:
 
-| Topology   | Candidate    | Release      |
-| ---------- | ------------ | ------------ |
-| `standard` | `staging`    | `production` |
-| `chain`    | `testnet`    | `mainnet`    |
-| `single`   | `production` | `production` |
+| Topology   | Candidate   | Release      |
+| ---------- | ----------- | ------------ |
+| `standard` | `staging`   | `production` |
+| `chain`    | `testnet`   | `mainnet`    |
+| `single`   | same target | same target  |
 
 Preview deployments use the actual target environment. `preview` and
 `preview-*` GitHub Environments are invalid.
@@ -73,8 +77,8 @@ instead of by environment:
 | GitHub release published | `deploy` — this is what serves traffic      |
 
 Its policy names no `wranglerEnv`, because there is no wrangler environment to
-name — the deploy omits `--env` entirely. Both roles must declare
-`githubEnvironment: "production"` and the same `url`.
+name — the deploy omits `--env` entirely. Both roles must declare the same real
+`githubEnvironment` and the same `url`.
 
 ```jsonc
 {

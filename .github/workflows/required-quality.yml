@@ -4,6 +4,42 @@ on:
   pull_request:
   merge_group:
   workflow_call:
+    inputs:
+      quality-policy-path:
+        description: Repository-relative quality policy JSONC path
+        required: false
+        default: .github/quality-policy.jsonc
+        type: string
+      deployment-policy-path:
+        description: Repository-relative Cloudflare deployment policy JSONC path
+        required: false
+        default: .github/deployment-policy.jsonc
+        type: string
+      npm-policy-path:
+        description: Repository-relative npm policy JSONC path
+        required: false
+        default: .github/npm-policy.jsonc
+        type: string
+      phala-policy-path:
+        description: Repository-relative Phala policy JSONC path
+        required: false
+        default: .github/phala-policy.jsonc
+        type: string
+      deployment-required:
+        description: Fail when the selected deployment policy is absent
+        required: false
+        default: false
+        type: boolean
+      npm-required:
+        description: Fail when the selected npm policy is absent
+        required: false
+        default: false
+        type: boolean
+      phala-required:
+        description: Fail when the selected Phala policy is absent
+        required: false
+        default: false
+        type: boolean
     outputs:
       quality-policy:
         description: Validated quality policy
@@ -45,11 +81,24 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: burnt-labs/github-workflows
-          ref: 7b22e570359626013ba6c803b5d125f7568f0e54
+          ref: 0545b1897dd89fc5c153bb80ac913df7da344fbd # v1.3.0
           path: .burnt-workflows
       - id: policy
         name: Validate policies
-        run: node .burnt-workflows/scripts/policy.bundle.mjs
+        env:
+          QUALITY_POLICY_PATH: ${{ inputs.quality-policy-path }}
+          DEPLOYMENT_POLICY_PATH: ${{ inputs.deployment-policy-path }}
+          NPM_POLICY_PATH: ${{ inputs.npm-policy-path }}
+          PHALA_POLICY_PATH: ${{ inputs.phala-policy-path }}
+          DEPLOYMENT_REQUIRED: ${{ inputs.deployment-required }}
+          NPM_REQUIRED: ${{ inputs.npm-required }}
+          PHALA_REQUIRED: ${{ inputs.phala-required }}
+        run: |
+          args=()
+          if [ "$DEPLOYMENT_REQUIRED" = "true" ]; then args+=(--deployment); fi
+          if [ "$NPM_REQUIRED" = "true" ]; then args+=(--npm); fi
+          if [ "$PHALA_REQUIRED" = "true" ]; then args+=(--phala); fi
+          node .burnt-workflows/scripts/policy.bundle.mjs "${args[@]}"
 
   quality:
     name: Quality

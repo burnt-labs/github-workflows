@@ -7,10 +7,21 @@ function strictVersion(version) {
   return match.slice(1).map(Number);
 }
 
-export function nextReleaseVersion(packageVersion, releaseTags = []) {
+function releaseTagPattern(releasePrefix) {
+  const prefix = releasePrefix ? `${releasePrefix}-` : "";
+  return new RegExp(`^${prefix}v(\\d+)\\.(\\d+)\\.(\\d+)$`);
+}
+
+export function nextReleaseVersion(
+  packageVersion,
+  releaseTags = [],
+  releasePrefix = "",
+) {
+  const pattern = releaseTagPattern(releasePrefix);
   const versions = releaseTags
-    .filter((tag) => /^v\d+\.\d+\.\d+$/.test(tag))
-    .map((tag) => strictVersion(tag.slice(1)));
+    .map((tag) => pattern.exec(tag))
+    .filter(Boolean)
+    .map((match) => match.slice(1).map(Number));
   if (versions.length === 0) versions.push(strictVersion(packageVersion));
   versions.sort((left, right) => {
     for (let index = 0; index < 3; index += 1) {
@@ -30,15 +41,21 @@ function output(name, value) {
 function main() {
   const versionFile = process.env.VERSION_FILE ?? "package.json";
   const packageJson = JSON.parse(fs.readFileSync(versionFile, "utf8"));
+  const releasePrefix = process.env.RELEASE_PREFIX ?? "";
+  const tagPrefix = releasePrefix ? `${releasePrefix}-` : "";
   const next = nextReleaseVersion(
     packageJson.version,
     (process.env.RELEASE_TAGS ?? "").split("\n").filter(Boolean),
+    releasePrefix,
   );
   if (!process.env.GITHUB_RUN_NUMBER) {
     throw new Error("GITHUB_RUN_NUMBER is required");
   }
-  output("candidate-tag", `v${next}-rc.${process.env.GITHUB_RUN_NUMBER}`);
-  output("release-tag", `v${next}`);
+  output(
+    "candidate-tag",
+    `${tagPrefix}v${next}-rc.${process.env.GITHUB_RUN_NUMBER}`,
+  );
+  output("release-tag", `${tagPrefix}v${next}`);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

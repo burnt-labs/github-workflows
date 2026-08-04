@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import {
+  loadPolicies,
   parseJsonc,
   validateDeploymentPolicy,
   validateNpmPolicy,
@@ -149,9 +153,62 @@ test("deployment accepts only exact topology environments", () => {
     assert.deepEqual(validateDeploymentPolicy(deploymentPolicy(topology)), {
       ...deploymentPolicy(topology),
       previewReleaseOnMain: true,
+      releasePrefix: "",
       workerSecrets: [],
     });
   }
+});
+
+test("deployment accepts a monorepo release prefix", () => {
+  const policy = deploymentPolicy();
+  policy.releasePrefix = "screening";
+  assert.equal(validateDeploymentPolicy(policy).releasePrefix, "screening");
+
+  for (const invalid of ["Screening", "screening_site", "-screening"]) {
+    const malformed = deploymentPolicy();
+    malformed.releasePrefix = invalid;
+    assert.throws(
+      () => validateDeploymentPolicy(malformed),
+      /releasePrefix must be empty or a lowercase letters-and-numbers slug/,
+    );
+  }
+});
+
+test("policies can be loaded from app-specific repository paths", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "policy-paths-"));
+  t.after(() => fs.rmSync(root, { recursive: true }));
+  const policyDirectory = path.join(root, ".github", "apps", "screening");
+  fs.mkdirSync(policyDirectory, { recursive: true });
+  fs.writeFileSync(
+    path.join(policyDirectory, "quality-policy.jsonc"),
+    JSON.stringify(qualityPolicy()),
+  );
+  fs.writeFileSync(
+    path.join(policyDirectory, "deployment-policy.jsonc"),
+    JSON.stringify(singleDeploymentPolicy()),
+  );
+
+  const policies = loadPolicies(root, true, false, false, {
+    quality: ".github/apps/screening/quality-policy.jsonc",
+    deployment: ".github/apps/screening/deployment-policy.jsonc",
+  });
+  assert.equal(policies.quality.workingDirectory, ".");
+  assert.equal(policies.deployment.topology, "single");
+
+  assert.throws(
+    () =>
+      loadPolicies(root, false, false, false, {
+        quality: "../quality-policy.jsonc",
+      }),
+    /must stay inside the repository root/,
+  );
+  assert.throws(
+    () =>
+      loadPolicies(root, false, false, false, {
+        quality: ".github/apps/screening/quality-policy.json",
+      }),
+    /must name a \.jsonc file/,
+  );
 });
 
 test("workerSecrets defaults to none and accepts uppercase names", () => {
@@ -257,12 +314,17 @@ test("single topology forbids naming a wrangler environment", () => {
   }
 });
 
-test("single topology fixes the GitHub Environment to production", () => {
+test("single topology uses one real GitHub Environment for both roles", () => {
   const policy = singleDeploymentPolicy();
-  policy.targets.candidate.githubEnvironment = "staging";
+  policy.targets.candidate.githubEnvironment = "prod-screening";
+  policy.targets.release.githubEnvironment = "prod-screening";
+  const validated = validateDeploymentPolicy(policy);
+  assert.equal(validated.targets.candidate.githubEnvironment, "prod-screening");
+
+  policy.targets.release.githubEnvironment = "another-environment";
   assert.throws(
     () => validateDeploymentPolicy(policy),
-    /single topology requires targets\.candidate\.githubEnvironment=production/,
+    /targets\.candidate\.githubEnvironment and targets\.release\.githubEnvironment to match/,
   );
 });
 
