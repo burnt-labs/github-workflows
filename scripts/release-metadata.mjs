@@ -8,7 +8,8 @@ function strictVersion(version) {
 }
 
 function releaseTagPattern(releasePrefix) {
-  const prefix = releasePrefix ? `${releasePrefix}-` : "";
+  const escapedPrefix = releasePrefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const prefix = escapedPrefix ? `${escapedPrefix}-` : "";
   return new RegExp(`^${prefix}v(\\d+)\\.(\\d+)\\.(\\d+)$`);
 }
 
