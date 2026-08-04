@@ -67,14 +67,19 @@ jobs:
     needs: quality
     runs-on: ubuntu-latest
     env:
+      PRERELEASE: ${{ inputs.prerelease }}
       RELEASE_PREFIX: ${{ fromJSON(needs.quality.outputs.deployment-policy).releasePrefix }}
       RELEASE_TAG: ${{ inputs.release-tag }}
     steps:
       - run: |
           tag_prefix=""
           if [ -n "$RELEASE_PREFIX" ]; then tag_prefix="${RELEASE_PREFIX}-"; fi
-          if [[ ! "$RELEASE_TAG" =~ ^${tag_prefix}v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]; then
-            echo "::error::release tag $RELEASE_TAG does not belong to ${RELEASE_PREFIX:-the default release namespace}"
+          stable_pattern="^${tag_prefix}v[0-9]+\.[0-9]+\.[0-9]+$"
+          candidate_pattern="^${tag_prefix}v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$"
+          expected_pattern="$stable_pattern"
+          if [ "$PRERELEASE" = "true" ]; then expected_pattern="$candidate_pattern"; fi
+          if [[ ! "$RELEASE_TAG" =~ $expected_pattern ]]; then
+            echo "::error::release tag $RELEASE_TAG does not belong to ${RELEASE_PREFIX:-the default release namespace} or match prerelease=$PRERELEASE"
             exit 1
           fi
 
