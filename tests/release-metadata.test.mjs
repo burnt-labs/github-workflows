@@ -25,3 +25,10 @@ test("release metadata isolates app-prefixed release histories", () => {
     "7.8.10",
   );
 });
+
+test("release metadata treats prefixes as literal text", () => {
+  assert.equal(
+    nextReleaseVersion("1.0.0", ["webX-v9.9.9", "web.+-v2.3.4"], "web.+"),
+    "2.3.5",
+  );
+});

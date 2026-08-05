@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import test from "node:test";
 import { parse } from "yaml";
@@ -38,6 +39,25 @@ test("every internal workflow pin carries release metadata", () => {
       assert.match(line, /@[0-9a-f]{40} # v\d+\.\d+\.\d+$/, `${name}: ${line}`);
     }
   }
+});
+
+test("release metadata consumers use the same pinned script revision", () => {
+  const refs = ["cloudflare-main.yml", "npm-main.yml"].map((name) => {
+    const workflow = parse(fs.readFileSync(`${directory}/${name}`, "utf8"));
+    const checkout = workflow.jobs.metadata.steps.find(
+      (step) =>
+        step.with?.repository === "burnt-labs/github-workflows" &&
+        step.with?.path === ".burnt-workflows",
+    );
+    assert.ok(checkout, `${name} must check out release metadata scripts`);
+    assert.match(checkout.with.ref, /^[0-9a-f]{40}$/, name);
+    return checkout.with.ref;
+  });
+  assert.equal(
+    new Set(refs).size,
+    1,
+    `release metadata workflows disagree on the script revision: ${refs.join(", ")}`,
+  );
 });
 
 test("required quality supports ruleset events without filters", () => {
@@ -348,6 +368,50 @@ test("release rejects an unrecognized operation instead of skipping", () => {
   );
   // Every deploying job must sit downstream of the guard.
   assert.deepEqual(workflow.jobs.quality.needs, "validate");
+});
+
+test("release rejects tags from another app namespace", () => {
+  const workflow = parse(
+    fs.readFileSync(`${directory}/cloudflare-release.yml`, "utf8"),
+  );
+  const guard = workflow.jobs["validate-release-tag"];
+  assert.equal(guard.needs, "quality");
+  assert.match(guard.env.PRERELEASE, /inputs\.prerelease/);
+  assert.match(guard.env.RELEASE_PREFIX, /releasePrefix/);
+  assert.match(guard.steps[0].run, /does not belong/);
+  for (const [releaseTag, prerelease, expectedStatus] of [
+    ["screening-v1.2.3", "false", 0],
+    ["screening-v1.2.3-rc.7", "true", 0],
+    ["screening-v1.2.3-rc.7", "false", 1],
+    ["screening-v1.2.3", "true", 1],
+    ["burnt-v1.2.3", "false", 1],
+  ]) {
+    const result = spawnSync(
+      "bash",
+      ["-euo", "pipefail", "-c", guard.steps[0].run],
+      {
+        env: {
+          ...process.env,
+          PRERELEASE: prerelease,
+          RELEASE_PREFIX: "screening",
+          RELEASE_TAG: releaseTag,
+        },
+      },
+    );
+    assert.equal(
+      result.status,
+      expectedStatus,
+      `${releaseTag} prerelease=${prerelease}: ${result.stderr}`,
+    );
+  }
+  assert.deepEqual(workflow.jobs["preview-release"].needs, [
+    "quality",
+    "validate-release-tag",
+  ]);
+  assert.deepEqual(workflow.jobs["deploy-release"].needs, [
+    "quality",
+    "validate-release-tag",
+  ]);
 });
 
 test("release candidates cannot deploy the release target", () => {
