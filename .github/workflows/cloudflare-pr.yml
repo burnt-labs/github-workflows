@@ -63,7 +63,7 @@ jobs:
       quality-policy: ${{ needs.quality.outputs.quality-policy }}
       deployment-policy: ${{ needs.quality.outputs.deployment-policy }}
       version-tag: ${{ needs.metadata.outputs.version-tag }}
-      version-message: PR #${{ github.event.pull_request.number }} ${{ github.event.pull_request.html_url }}
+      version-message: PR-${{ github.event.pull_request.number }}-${{ github.event.pull_request.html_url }}
     secrets: inherit
 
   publish-preview:

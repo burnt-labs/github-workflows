@@ -238,6 +238,25 @@ test("the single-topology --env fragment cannot fall through", () => {
   assert.doesNotMatch(fragment, /&& ''/);
 });
 
+test("Cloudflare version messages remain one command token", () => {
+  // wrangler-action tokenizes its command input without retaining quotes.
+  // Whitespace therefore turns the rest of a message into a positional
+  // argument, which `wrangler deploy` interprets as a Worker entry point.
+  for (const name of [
+    "cloudflare-pr.yml",
+    "cloudflare-main.yml",
+    "cloudflare-release.yml",
+  ]) {
+    const workflow = parse(fs.readFileSync(`${directory}/${name}`, "utf8"));
+    for (const [jobName, job] of Object.entries(workflow.jobs)) {
+      const message = job.with?.["version-message"];
+      if (message === undefined) continue;
+      const renderedStaticText = message.replace(/\$\{\{.*?\}\}/g, "");
+      assert.doesNotMatch(renderedStaticText, /\s/, `${name}:${jobName}`);
+    }
+  }
+});
+
 test("Worker secrets are allowlisted, never forwarded wholesale", () => {
   // toJSON(secrets) in the publish step contains every secret the caller
   // inherited, the Cloudflare API token included. The allowlist is the entire

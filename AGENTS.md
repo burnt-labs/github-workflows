@@ -501,7 +501,9 @@ consumer's checked-out branch, so on a pull request they are attacker-controlled
 to the extent that opening a PR is. Fork PRs are excluded and receive no secrets,
 which is the boundary this relies on. Never pass a branch name, PR title, or any
 other free-text field into `version-message` or a `command:` input; PR numbers
-and URLs are safe.
+and URLs are safe. Keep each rendered `version-message` whitespace-free because
+wrangler-action tokenizes its `command` input without preserving quoted spaces;
+an extra token is treated as a Worker entry point by `wrangler deploy`.
 
 **A blocked install script does not fail the install.** npm 12 default-denies
 dependency lifecycle scripts and warns rather than erroring, so the install goes

@@ -96,7 +96,7 @@ jobs:
       quality-policy: ${{ needs.quality.outputs.quality-policy }}
       deployment-policy: ${{ needs.quality.outputs.deployment-policy }}
       version-tag: ${{ inputs.release-tag }}
-      version-message: Release preview ${{ inputs.release-url }}
+      version-message: Release-preview-${{ inputs.release-url }}
     secrets: inherit
 
   deploy-release:
@@ -115,7 +115,7 @@ jobs:
       quality-policy: ${{ needs.quality.outputs.quality-policy }}
       deployment-policy: ${{ needs.quality.outputs.deployment-policy }}
       version-tag: ${{ inputs.release-tag }}
-      version-message: Release ${{ inputs.release-url }}
+      version-message: Release-${{ inputs.release-url }}
     secrets: inherit
 
   annotate-release:

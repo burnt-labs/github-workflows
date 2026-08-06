@@ -89,7 +89,7 @@ jobs:
       quality-policy: ${{ needs.quality.outputs.quality-policy }}
       deployment-policy: ${{ needs.quality.outputs.deployment-policy }}
       version-tag: ${{ needs.metadata.outputs.candidate-tag }}
-      version-message: RC ${{ needs.metadata.outputs.candidate-url }}
+      version-message: RC-${{ needs.metadata.outputs.candidate-url }}
     secrets: inherit
 
   preview-release:
@@ -105,7 +105,7 @@ jobs:
       quality-policy: ${{ needs.quality.outputs.quality-policy }}
       deployment-policy: ${{ needs.quality.outputs.deployment-policy }}
       version-tag: ${{ needs.metadata.outputs.candidate-tag }}
-      version-message: RC ${{ needs.metadata.outputs.candidate-url }}
+      version-message: RC-${{ needs.metadata.outputs.candidate-url }}
     secrets: inherit
 
   create-releases:
@@ -191,7 +191,7 @@ jobs:
       quality-policy: ${{ needs.quality.outputs.quality-policy }}
       deployment-policy: ${{ needs.quality.outputs.deployment-policy }}
       version-tag: ${{ needs.metadata.outputs.release-tag }}
-      version-message: Release ${{ needs.create-releases.outputs.release-url }}
+      version-message: Release-${{ needs.create-releases.outputs.release-url }}
     secrets: inherit
 
   publish-automatic-release:
