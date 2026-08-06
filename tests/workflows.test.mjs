@@ -238,6 +238,28 @@ test("the single-topology --env fragment cannot fall through", () => {
   assert.doesNotMatch(fragment, /&& ''/);
 });
 
+test("Wrangler metadata arguments remain single tokens", () => {
+  // wrangler-action parses its multiline command before execution. Quoting a
+  // human-readable message containing spaces is not preserved, so the trailing
+  // URL becomes a positional argument that `wrangler deploy` mistakes for an
+  // entry-point path. The release tag is already a safe, traceable identifier;
+  // keep the full source URL in the job summary instead.
+  const workflow = parse(
+    fs.readFileSync(`${directory}/cloudflare-version.yml`, "utf8"),
+  );
+  const deploy = workflow.jobs.version.steps.find(
+    (step) => step.id === "wrangler",
+  );
+  assert.match(
+    deploy.with.command,
+    /--message=\$\{\{ inputs\.version-tag \}\}/,
+  );
+  assert.doesNotMatch(
+    deploy.with.command,
+    /--message[^\n]*inputs\.version-message/,
+  );
+});
+
 test("Worker secrets are allowlisted, never forwarded wholesale", () => {
   // toJSON(secrets) in the publish step contains every secret the caller
   // inherited, the Cloudflare API token included. The allowlist is the entire

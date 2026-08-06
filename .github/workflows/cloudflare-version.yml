@@ -179,7 +179,7 @@ jobs:
           command: >-
             ${{ inputs.operation == 'preview' && 'versions upload' || 'deploy' }}
             ${{ fromJSON(inputs.deployment-policy).topology != 'single' && format('--env {0}', fromJSON(inputs.deployment-policy).targets[inputs.target].wranglerEnv) || '' }}
-            --message "${{ inputs.version-message }}"
+            --message=${{ inputs.version-tag }}
             --tag "${{ inputs.version-tag }}"
       - name: Extract Cloudflare metadata
         id: metadata
