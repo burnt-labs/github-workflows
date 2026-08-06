@@ -89,7 +89,7 @@ jobs:
     permissions:
       contents: read
       deployments: write
-    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@7b22e570359626013ba6c803b5d125f7568f0e54 # v1.3.0
+    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@4a6cfa58306d36d969659a2673dbe1bd56d6b408 # v1.3.1
     with:
       operation: preview
       target: release
@@ -108,7 +108,7 @@ jobs:
     permissions:
       contents: read
       deployments: write
-    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@7b22e570359626013ba6c803b5d125f7568f0e54 # v1.3.0
+    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@4a6cfa58306d36d969659a2673dbe1bd56d6b408 # v1.3.1
     with:
       operation: deploy
       target: release
