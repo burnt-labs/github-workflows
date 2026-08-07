@@ -17,9 +17,9 @@ These are not preferences. Changes that break them will be rejected.
 - Require lint, Prettier, type-check, tests, coverage, and build as independent
   quality gates.
 - Run every direct job on Ubicloud. Use `ubicloud-standard-2` for lightweight
-  policy, metadata, and release orchestration jobs, and `ubicloud-standard-8`
-  for jobs that install, test, build, package, publish, or containerize consumer
-  code.
+  policy, metadata, and release orchestration jobs; `ubicloud-standard-4` for
+  jobs that install, test, build, package, or publish consumer application code;
+  and `ubicloud-standard-8` for container builds.
 - Pin every `uses:` reference to a full commit SHA with a trailing version
   comment. Dependabot advances the pins.
 - Pin the npm CLI in every job that runs a consumer's `install`, and never

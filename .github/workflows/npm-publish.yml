@@ -28,7 +28,7 @@ permissions:
 jobs:
   publish:
     name: Publish ${{ inputs.dist-tag }}
-    runs-on: ubicloud-standard-8
+    runs-on: ubicloud-standard-4
     outputs:
       package-name: ${{ steps.package.outputs.name }}
       package-version: ${{ inputs.version }}

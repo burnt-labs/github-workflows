@@ -32,6 +32,7 @@ test("every action reference is pinned to a full commit SHA", () => {
 test("every direct job runs on an approved Ubicloud runner", () => {
   const approvedRunners = new Set([
     "ubicloud-standard-2",
+    "ubicloud-standard-4",
     "ubicloud-standard-8",
   ]);
 

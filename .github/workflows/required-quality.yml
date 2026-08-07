@@ -103,7 +103,7 @@ jobs:
   quality:
     name: Quality
     needs: policy
-    runs-on: ubicloud-standard-8
+    runs-on: ubicloud-standard-4
     defaults:
       run:
         working-directory: ${{ fromJSON(needs.policy.outputs.quality).workingDirectory }}
