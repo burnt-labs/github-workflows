@@ -29,6 +29,25 @@ test("every action reference is pinned to a full commit SHA", () => {
   }
 });
 
+test("every direct job runs on an approved Ubicloud runner", () => {
+  const approvedRunners = new Set([
+    "ubicloud-standard-2",
+    "ubicloud-standard-8",
+  ]);
+
+  for (const name of fs.readdirSync(directory)) {
+    if (!name.endsWith(".yml")) continue;
+    const workflow = parse(fs.readFileSync(`${directory}/${name}`, "utf8"));
+    for (const [jobName, job] of Object.entries(workflow.jobs)) {
+      if (job.uses) continue;
+      assert.ok(
+        approvedRunners.has(job["runs-on"]),
+        `${name}:${jobName} must use an approved Ubicloud runner`,
+      );
+    }
+  }
+});
+
 test("every internal workflow pin carries release metadata", () => {
   for (const name of fs.readdirSync(directory)) {
     if (!name.endsWith(".yml")) continue;
