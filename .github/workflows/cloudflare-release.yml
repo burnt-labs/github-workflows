@@ -47,7 +47,7 @@ jobs:
   # deploy-release and the run reports success having done nothing.
   validate:
     name: Validate invocation
-    runs-on: ubuntu-latest
+    runs-on: ubicloud-standard-2
     steps:
       - if: ${{ !contains(fromJSON('["preview","deploy"]'), inputs.operation) }}
         run: |
@@ -65,7 +65,7 @@ jobs:
   validate-release-tag:
     name: Validate app release tag
     needs: quality
-    runs-on: ubuntu-latest
+    runs-on: ubicloud-standard-2
     env:
       PRERELEASE: ${{ inputs.prerelease }}
       RELEASE_PREFIX: ${{ fromJSON(needs.quality.outputs.deployment-policy).releasePrefix }}
@@ -120,7 +120,7 @@ jobs:
 
   annotate-release:
     needs: deploy-release
-    runs-on: ubuntu-latest
+    runs-on: ubicloud-standard-2
     permissions:
       contents: write
     steps:

@@ -35,7 +35,7 @@ jobs:
 
   metadata:
     needs: quality
-    runs-on: ubuntu-latest
+    runs-on: ubicloud-standard-2
     outputs:
       candidate-tag: ${{ steps.metadata.outputs.candidate-tag }}
       release-tag: ${{ steps.metadata.outputs.release-tag }}
@@ -117,7 +117,7 @@ jobs:
       needs.deploy-candidate.result == 'success' &&
       (needs.preview-release.result == 'success' ||
        needs.preview-release.result == 'skipped')
-    runs-on: ubuntu-latest
+    runs-on: ubicloud-standard-2
     permissions:
       contents: write
     outputs:
@@ -199,7 +199,7 @@ jobs:
     if: >-
       !cancelled() &&
       needs.deploy-release-automatic.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ubicloud-standard-2
     permissions:
       contents: write
     steps:

@@ -66,7 +66,7 @@ permissions:
 jobs:
   policy:
     name: Policy
-    runs-on: ubuntu-latest
+    runs-on: ubicloud-standard-2
     outputs:
       quality: ${{ steps.policy.outputs.quality }}
       deployment: ${{ steps.policy.outputs.deployment }}
@@ -103,7 +103,7 @@ jobs:
   quality:
     name: Quality
     needs: policy
-    runs-on: ubuntu-latest
+    runs-on: ubicloud-standard-8
     defaults:
       run:
         working-directory: ${{ fromJSON(needs.policy.outputs.quality).workingDirectory }}

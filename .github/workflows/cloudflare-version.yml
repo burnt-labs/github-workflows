@@ -50,7 +50,7 @@ permissions:
 jobs:
   version:
     name: ${{ inputs.target }} ${{ inputs.operation }}
-    runs-on: ubuntu-latest
+    runs-on: ubicloud-standard-8
     environment:
       name: ${{ fromJSON(inputs.deployment-policy).targets[inputs.target].githubEnvironment }}
       url: ${{ steps.metadata.outputs.deployment-url }}

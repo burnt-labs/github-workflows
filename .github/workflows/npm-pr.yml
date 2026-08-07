@@ -13,7 +13,7 @@ jobs:
   pack:
     name: Package dry run
     needs: quality
-    runs-on: ubuntu-latest
+    runs-on: ubicloud-standard-8
     defaults:
       run:
         working-directory: ${{ fromJSON(needs.quality.outputs.npm-policy).workingDirectory }}

@@ -39,7 +39,7 @@ jobs:
 
   metadata:
     needs: quality
-    runs-on: ubuntu-latest
+    runs-on: ubicloud-standard-2
     outputs:
       version-tag: ${{ steps.tag.outputs.version-tag }}
     steps:
@@ -68,7 +68,7 @@ jobs:
 
   publish-preview:
     needs: [quality, preview-candidate]
-    runs-on: ubuntu-latest
+    runs-on: ubicloud-standard-2
     permissions:
       contents: read
       issues: write

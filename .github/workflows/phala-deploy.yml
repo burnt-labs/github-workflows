@@ -18,7 +18,7 @@ permissions:
 jobs:
   validate:
     name: Validate invocation
-    runs-on: ubuntu-latest
+    runs-on: ubicloud-standard-2
     steps:
       - name: Validate target
         if: ${{ !contains(fromJSON('["candidate","release"]'), inputs.target) }}
@@ -29,7 +29,7 @@ jobs:
   policy:
     name: Phala policy
     needs: validate
-    runs-on: ubuntu-latest
+    runs-on: ubicloud-standard-2
     outputs:
       phala: ${{ steps.policy.outputs.phala }}
     steps:
@@ -52,7 +52,7 @@ jobs:
   deploy:
     name: Phala ${{ inputs.target }}
     needs: [policy, quality]
-    runs-on: ubuntu-latest
+    runs-on: ubicloud-standard-8
     environment:
       name: ${{ fromJSON(needs.policy.outputs.phala).targets[inputs.target].githubEnvironment }}
       url: ${{ steps.phala-url.outputs.deployment-url }}

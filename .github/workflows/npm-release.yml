@@ -20,7 +20,7 @@ jobs:
   metadata:
     needs: quality
     if: inputs.prerelease == false
-    runs-on: ubuntu-latest
+    runs-on: ubicloud-standard-2
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -50,7 +50,7 @@ jobs:
 
   annotate-release:
     needs: publish-release
-    runs-on: ubuntu-latest
+    runs-on: ubicloud-standard-2
     permissions:
       contents: write
     steps:
