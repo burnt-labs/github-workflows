@@ -56,7 +56,7 @@ jobs:
 
   quality:
     needs: validate
-    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@c3fb3c74917eaede1f4e57dd2b16bd2b6f62c5fb # v1.3.0
+    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@c0c7d642f37b3046190c15c6dc7f4424ee2978ee # v1.3.3
     with:
       quality-policy-path: ${{ inputs.quality-policy-path }}
       deployment-policy-path: ${{ inputs.deployment-policy-path }}
@@ -89,7 +89,7 @@ jobs:
     permissions:
       contents: read
       deployments: write
-    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@4a6cfa58306d36d969659a2673dbe1bd56d6b408 # v1.3.1
+    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@c0c7d642f37b3046190c15c6dc7f4424ee2978ee # v1.3.3
     with:
       operation: preview
       target: release
@@ -108,7 +108,7 @@ jobs:
     permissions:
       contents: read
       deployments: write
-    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@4a6cfa58306d36d969659a2673dbe1bd56d6b408 # v1.3.1
+    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@c0c7d642f37b3046190c15c6dc7f4424ee2978ee # v1.3.3
     with:
       operation: deploy
       target: release
