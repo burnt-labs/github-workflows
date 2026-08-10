@@ -134,6 +134,13 @@ test("Cloudflare PRs allow same-repository branches when the repository is a for
   assert.doesNotMatch(workflow.jobs.quality.if, /head\.repo\.fork/);
 });
 
+test("Cloudflare PRs keep quality but skip credentialed previews for Dependabot", () => {
+  const source = fs.readFileSync(`${directory}/cloudflare-pr.yml`, "utf8");
+  const workflow = parse(source);
+  assert.doesNotMatch(workflow.jobs.quality.if, /dependabot/);
+  assert.match(workflow.jobs["preview-candidate"].if, /dependabot\[bot\]/);
+});
+
 test("Cloudflare entrypoints forward app-scoped policy paths", () => {
   for (const name of [
     "cloudflare-pr.yml",

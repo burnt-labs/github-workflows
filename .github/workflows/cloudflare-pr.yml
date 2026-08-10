@@ -31,7 +31,7 @@ jobs:
       github.event_name != 'pull_request' ||
       (github.event.pull_request.draft == false &&
        github.event.pull_request.head.repo.full_name == github.repository)
-    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@097d5108730cb869d1b83db72bef5949a16f8037 # v1.3.4
+    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@0edf0e43d8657f05fa08591a69f5a2d38a7f0dd3 # v1.3.4
     with:
       quality-policy-path: ${{ inputs.quality-policy-path }}
       deployment-policy-path: ${{ inputs.deployment-policy-path }}
@@ -52,11 +52,17 @@ jobs:
           echo "version-tag=${RELEASE_PREFIX}pr-${PR_NUMBER}-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
   preview-candidate:
+    # Dependabot pull requests cannot receive Actions secrets. Quality still
+    # runs above, but a deployment preview must not be attempted without the
+    # Cloudflare credentials.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.user.login != 'dependabot[bot]'
     needs: [quality, metadata]
     permissions:
       contents: read
       deployments: write
-    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@097d5108730cb869d1b83db72bef5949a16f8037 # v1.3.4
+    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@0edf0e43d8657f05fa08591a69f5a2d38a7f0dd3 # v1.3.4
     with:
       operation: preview
       target: candidate
