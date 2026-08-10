@@ -52,6 +52,12 @@ jobs:
           echo "version-tag=${RELEASE_PREFIX}pr-${PR_NUMBER}-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
   preview-candidate:
+    # Dependabot pull requests cannot receive Actions secrets. Quality still
+    # runs above, but a deployment preview must not be attempted without the
+    # Cloudflare credentials.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.user.login != 'dependabot[bot]'
     needs: [quality, metadata]
     permissions:
       contents: read
