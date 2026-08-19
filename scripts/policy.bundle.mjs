@@ -1199,9 +1199,17 @@ function validateDeploymentPolicy(policy) {
           `${policy.topology} topology requires targets.${role}.wranglerEnv=${expected[role]}`,
         );
       }
-      if (target.githubEnvironment !== target.wranglerEnv) {
+      const prefixed = policy.releasePrefix
+        ? `${policy.releasePrefix}-${target.wranglerEnv}`
+        : void 0;
+      if (
+        target.githubEnvironment !== target.wranglerEnv &&
+        target.githubEnvironment !== prefixed
+      ) {
         throw new Error(
-          `targets.${role}.githubEnvironment must equal wranglerEnv`,
+          prefixed
+            ? `targets.${role}.githubEnvironment must equal wranglerEnv or ${prefixed}`
+            : `targets.${role}.githubEnvironment must equal wranglerEnv`,
         );
       }
     }

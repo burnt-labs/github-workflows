@@ -159,6 +159,59 @@ test("deployment accepts only exact topology environments", () => {
   }
 });
 
+test("deployment lets a monorepo scope its GitHub Environments per app", () => {
+  // Without this, three apps in one repository share the `testnet`
+  // environment — and therefore one set of build-time Variables and Secrets,
+  // so one app's config reaches another app's build.
+  const policy = deploymentPolicy("chain");
+  policy.releasePrefix = "web";
+  policy.targets.candidate.githubEnvironment = "web-testnet";
+  policy.targets.release.githubEnvironment = "web-mainnet";
+
+  const validated = validateDeploymentPolicy(policy);
+  assert.equal(validated.targets.candidate.githubEnvironment, "web-testnet");
+  // The wrangler env is untouched: the deploy still targets `testnet`.
+  assert.equal(validated.targets.candidate.wranglerEnv, "testnet");
+});
+
+test("deployment rejects a GitHub Environment that is neither the wrangler env nor the prefixed one", () => {
+  // The prefix is the only namespacing allowed. Free-form names would let a
+  // repository point at an environment nothing actually deploys to, which is
+  // the same failure `preview-*` is banned for.
+  const unprefixed = deploymentPolicy("chain");
+  unprefixed.targets.candidate.githubEnvironment = "web-testnet";
+  assert.throws(
+    () => validateDeploymentPolicy(unprefixed),
+    /githubEnvironment must equal wranglerEnv/,
+  );
+
+  const wrongPrefix = deploymentPolicy("chain");
+  wrongPrefix.releasePrefix = "web";
+  wrongPrefix.targets.candidate.githubEnvironment = "admin-testnet";
+  assert.throws(
+    () => validateDeploymentPolicy(wrongPrefix),
+    /must equal wranglerEnv or web-testnet/,
+  );
+
+  const wrongEnv = deploymentPolicy("chain");
+  wrongEnv.releasePrefix = "web";
+  wrongEnv.targets.candidate.githubEnvironment = "web-mainnet";
+  assert.throws(
+    () => validateDeploymentPolicy(wrongEnv),
+    /must equal wranglerEnv or web-testnet/,
+  );
+});
+
+test("deployment still forbids preview environments under a release prefix", () => {
+  const policy = deploymentPolicy("chain");
+  policy.releasePrefix = "preview";
+  policy.targets.candidate.githubEnvironment = "preview-testnet";
+  assert.throws(
+    () => validateDeploymentPolicy(policy),
+    /preview-specific GitHub Environments are forbidden/,
+  );
+});
+
 test("deployment accepts a monorepo release prefix", () => {
   const policy = deploymentPolicy();
   policy.releasePrefix = "screening";

@@ -184,6 +184,18 @@ maps candidate to `staging` and release to `production`; `chain` maps them to
 `githubEnvironment` must equal `wranglerEnv`, and neither may be `preview` or
 start with `preview-`.
 
+**Monorepos may prefix the environment.** When `releasePrefix` is set,
+`githubEnvironment` may also be `<releasePrefix>-<wranglerEnv>` — `web-testnet`
+for `wranglerEnv: "testnet"`. Nothing else is accepted, so the real deploy
+target stays readable from the name.
+
+This exists because a GitHub Environment is where build-time Variables and
+Secrets live. One app per repository can name its environment after the
+wrangler env; three apps in one repository cannot, because they would then
+share one set of Variables and one app's `VITE_*` config would reach another
+app's build. The wrangler env is unaffected — `web-testnet` still deploys to
+`testnet`.
+
 `single` is the third topology, for Workers with no wrangler `env` block. Both
 roles are the same Worker, so promotion splits by traffic rather than by
 environment: the main flow uploads the candidate at 0% and publishing a release

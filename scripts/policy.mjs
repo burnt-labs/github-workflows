@@ -233,9 +233,28 @@ export function validateDeploymentPolicy(policy) {
           `${policy.topology} topology requires targets.${role}.wranglerEnv=${expected[role]}`,
         );
       }
-      if (target.githubEnvironment !== target.wranglerEnv) {
+      // One app per repository names its environment after the wrangler env.
+      // A monorepo cannot: three apps sharing `testnet` would share one set of
+      // build-time Variables and Secrets, so app A's config would leak into
+      // app B's build. `releasePrefix` already exists to keep release history
+      // per app, so it namespaces the environment too — `web-testnet` still
+      // deploys to wrangler env `testnet`.
+      //
+      // Deliberately not free-form. The environment must be either the
+      // wrangler env or exactly that prefix applied to it, which keeps the
+      // real deploy target readable from the name and leaves no room to invent
+      // an environment nothing deploys to.
+      const prefixed = policy.releasePrefix
+        ? `${policy.releasePrefix}-${target.wranglerEnv}`
+        : undefined;
+      if (
+        target.githubEnvironment !== target.wranglerEnv &&
+        target.githubEnvironment !== prefixed
+      ) {
         throw new Error(
-          `targets.${role}.githubEnvironment must equal wranglerEnv`,
+          prefixed
+            ? `targets.${role}.githubEnvironment must equal wranglerEnv or ${prefixed}`
+            : `targets.${role}.githubEnvironment must equal wranglerEnv`,
         );
       }
     }

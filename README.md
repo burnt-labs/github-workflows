@@ -17,7 +17,10 @@ Consumers define:
 
 Monorepos may keep one policy set per app and pass repository-relative policy
 paths to the reusable workflows. Cloudflare deployment policies can declare a
-lowercase `releasePrefix` so each app has an independent release history.
+lowercase `releasePrefix` so each app has an independent release history, and
+that same prefix may namespace the GitHub Environment
+(`githubEnvironment: "web-testnet"` against `wranglerEnv: "testnet"`) so each
+app owns its own build-time Variables and Secrets.
 
 Quality policy commands are mandatory and independently run: install, lint,
 Prettier, type-check, tests, coverage, and build. Each repository also owns
