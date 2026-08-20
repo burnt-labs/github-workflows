@@ -206,8 +206,45 @@ is the cost of modelling one environment honestly.
   "access": "public", // only "public" is accepted
   "candidateDistTag": "next",
   "releaseDistTag": "latest", // must be "latest", and must differ from candidate
+  // Optional, defaults to "patch". See "Version strategy" below.
+  "versionStrategy": "conventional",
 }
 ```
+
+#### Version strategy
+
+`patch` — the default, and the historical behaviour — increments the patch of
+the highest release tag. That suits an application: the number orders releases
+and nothing reads meaning into it.
+
+A published library is different. Its version is a statement to consumers about
+whether their code still compiles, and a patch-only pipeline cannot make that
+statement — a rename that breaks every consumer ships as `1.2.4`, indexed the
+same as a typo fix. `@burnt-labs/provider-registry-types` is the case in point:
+renaming `session_stored` to `sessionStored` broke every reader, and the only
+honest version for that is a major.
+
+`conventional` derives the bump from the commits since the last stable release
+tag:
+
+| Commit                                    | Bump  |
+| ----------------------------------------- | ----- |
+| `feat: …`                                 | minor |
+| `type!: …` or a `BREAKING CHANGE:` footer | major |
+| anything else, including non-conventional | patch |
+
+The highest bump in the set wins. An unrecognized subject is a patch rather
+than an error: a repository opting in still has old commits, and refusing to
+compute a version because someone wrote "wip" is a worse failure than
+under-bumping — which is also the safe direction, since `^1.2` is not broken by
+receiving `1.2.4` when `1.3.0` was meant.
+
+`BREAKING CHANGE:` counts only in a footer, never in a subject, so
+`docs: explain BREAKING CHANGE: policy` does not cut a major.
+
+Opting in makes the main flow check out full history and tags, because the
+commit range has to be readable. Nothing is written back — the bump is derived,
+not recorded.
 
 Publishing uses npm trusted publishing through GitHub OIDC with provenance. It
 never accepts an npm token — do not add one. `npm-publish.yml` fails before it
@@ -441,9 +478,11 @@ run is the one that gates merging.
 
 ## Versioning and promotion
 
-`scripts/release-metadata.mjs` computes the next version by taking the highest
-existing stable `v*.*.*` release tag and incrementing its patch. `versionFile`
-seeds this only when no stable release tags exist yet. Nothing is written back —
+`scripts/release-metadata.mjs` computes the next version from the highest
+existing stable `v*.*.*` release tag. It increments the patch by default; npm
+repositories that set `versionStrategy: "conventional"` get the bump read from
+their commit range instead, so `feat:` cuts a minor and a breaking change cuts
+a major. `versionFile` seeds this only when no stable release tags exist yet. Nothing is written back —
 a consumer's `package.json` version is not maintained by CI and will lag its
 tags. If a repository reports its version at runtime, read it from somewhere
 else.

@@ -290,6 +290,24 @@ export function validateNpmPolicy(policy) {
   if (policy.releaseDistTag !== "latest") {
     throw new Error("npm releaseDistTag must be latest");
   }
+
+  // How the next version is derived. `patch` increments the highest release
+  // tag, which suits an application: the number orders releases and nothing
+  // reads meaning into it.
+  //
+  // A published library is different. Its version is a statement to consumers
+  // about whether their code still compiles, and a patch-only pipeline cannot
+  // make that statement — a rename that breaks every consumer would ship as
+  // 1.2.4. `conventional` reads the bump from the commits since the last
+  // release instead, so `feat:` is a minor and `!`/`BREAKING CHANGE` is a
+  // major.
+  //
+  // Defaults to `patch` so existing repositories are unaffected.
+  if (policy.versionStrategy === undefined) {
+    policy.versionStrategy = "patch";
+  } else if (!["patch", "conventional"].includes(policy.versionStrategy)) {
+    throw new Error("npm versionStrategy must be patch or conventional");
+  }
   return policy;
 }
 
