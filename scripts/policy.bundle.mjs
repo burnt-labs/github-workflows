@@ -1251,6 +1251,11 @@ function validateNpmPolicy(policy) {
   if (policy.releaseDistTag !== "latest") {
     throw new Error("npm releaseDistTag must be latest");
   }
+  if (policy.versionStrategy === void 0) {
+    policy.versionStrategy = "patch";
+  } else if (!["patch", "conventional"].includes(policy.versionStrategy)) {
+    throw new Error("npm versionStrategy must be patch or conventional");
+  }
   return policy;
 }
 function validateEnvironmentNames(values, label, reserved = []) {

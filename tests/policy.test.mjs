@@ -468,11 +468,33 @@ test("JSONC supports comments and trailing commas", () => {
 });
 
 test("npm requires distinct candidate and latest release tags", () => {
-  assert.deepEqual(validateNpmPolicy(npmPolicy()), npmPolicy());
+  assert.deepEqual(validateNpmPolicy(npmPolicy()), {
+    ...npmPolicy(),
+    versionStrategy: "patch",
+  });
   const sameTag = npmPolicy();
   sameTag.candidateDistTag = "latest";
   assert.throws(() => validateNpmPolicy(sameTag), /must differ/);
   const restricted = npmPolicy();
   restricted.access = "restricted";
   assert.throws(() => validateNpmPolicy(restricted), /must be public/);
+});
+
+test("npm versionStrategy defaults to patch and rejects unknown values", () => {
+  // The default is what keeps every existing repository on exactly the
+  // behaviour it had before this option existed.
+  assert.equal(validateNpmPolicy(npmPolicy()).versionStrategy, "patch");
+
+  const conventional = npmPolicy();
+  conventional.versionStrategy = "conventional";
+  assert.equal(validateNpmPolicy(conventional).versionStrategy, "conventional");
+
+  for (const invalid of ["semver", "", "Patch", true]) {
+    const policy = npmPolicy();
+    policy.versionStrategy = invalid;
+    assert.throws(
+      () => validateNpmPolicy(policy),
+      /versionStrategy must be patch or conventional/,
+    );
+  }
 });

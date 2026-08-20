@@ -189,6 +189,12 @@ Example policy:
 }
 ```
 
+Versions patch-increment the highest release tag by default. A published
+library whose version has to tell consumers whether their code still compiles
+can set `"versionStrategy": "conventional"` instead, which reads the bump from
+the commits since the last release — `feat:` for a minor, `!` or a
+`BREAKING CHANGE:` footer for a major. See AGENTS.md for the full table.
+
 npm's deprecation of 2FA-bypass granular access tokens — no 2FA skipping for
 account operations from early August 2026, no publishing at all around January
 2027 — requires no migration here. These workflows never held a token, and a
