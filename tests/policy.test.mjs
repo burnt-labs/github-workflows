@@ -470,6 +470,7 @@ test("JSONC supports comments and trailing commas", () => {
 test("npm requires distinct candidate and latest release tags", () => {
   assert.deepEqual(validateNpmPolicy(npmPolicy()), {
     ...npmPolicy(),
+    releasePrefix: "",
     versionStrategy: "patch",
   });
   const sameTag = npmPolicy();
@@ -495,6 +496,26 @@ test("npm versionStrategy defaults to patch and rejects unknown values", () => {
     assert.throws(
       () => validateNpmPolicy(policy),
       /versionStrategy must be patch or conventional/,
+    );
+  }
+});
+
+test("npm releasePrefix namespaces a package's release line", () => {
+  // Without this, a repository running both the Cloudflare and npm flows has
+  // one release line for two independently versioned things, and the npm flow
+  // derives the package version from whatever the Worker last tagged.
+  assert.equal(validateNpmPolicy(npmPolicy()).releasePrefix, "");
+
+  const prefixed = npmPolicy();
+  prefixed.releasePrefix = "types";
+  assert.equal(validateNpmPolicy(prefixed).releasePrefix, "types");
+
+  for (const invalid of ["Types", "types_pkg", "-types", 7]) {
+    const policy = npmPolicy();
+    policy.releasePrefix = invalid;
+    assert.throws(
+      () => validateNpmPolicy(policy),
+      /npm releasePrefix must be empty or a lowercase letters-and-numbers slug/,
     );
   }
 });

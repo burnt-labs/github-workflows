@@ -43,18 +43,27 @@ jobs:
       - name: Read commits since the last release
         env:
           VERSION_STRATEGY: ${{ fromJSON(needs.quality.outputs.npm-policy).versionStrategy }}
+          RELEASE_PREFIX: ${{ fromJSON(needs.quality.outputs.npm-policy).releasePrefix }}
         run: |
           : > "$RUNNER_TEMP/commit-messages.txt"
           if [ "$VERSION_STRATEGY" != "conventional" ]; then
             exit 0
           fi
-          # The newest stable tag that exists in this clone. A tag named by a
+          # Only this package's tags. In a repository that also deploys a
+          # Worker, the newest tag overall is usually the Worker's, and reading
+          # commits since THAT would bump the package from an unrelated range.
+          pattern="^v[0-9]"
+          if [ -n "$RELEASE_PREFIX" ]; then
+            pattern="^${RELEASE_PREFIX}-v[0-9]"
+          fi
+          # The newest matching tag that exists in this clone. A tag named by a
           # release but never pushed as a git ref would otherwise make `git log`
           # fail; fall back to the whole history, which is correct for a first
           # release and merely verbose afterwards.
           last=""
           while read -r tag; do
             [ -n "$tag" ] || continue
+            printf '%s' "$tag" | grep -Eq "$pattern" || continue
             if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
               last="$tag"
               break
@@ -70,6 +79,7 @@ jobs:
           GITHUB_RUN_NUMBER: ${{ github.run_number }}
           VERSION_FILE: ${{ fromJSON(needs.quality.outputs.npm-policy).versionFile }}
           VERSION_STRATEGY: ${{ fromJSON(needs.quality.outputs.npm-policy).versionStrategy }}
+          RELEASE_PREFIX: ${{ fromJSON(needs.quality.outputs.npm-policy).releasePrefix }}
           COMMIT_MESSAGES_FILE: ${{ runner.temp }}/commit-messages.txt
         run: |
           RELEASE_TAGS="$(cat "$RUNNER_TEMP/release-tags.txt")" \

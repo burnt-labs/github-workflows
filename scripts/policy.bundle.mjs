@@ -1251,6 +1251,17 @@ function validateNpmPolicy(policy) {
   if (policy.releaseDistTag !== "latest") {
     throw new Error("npm releaseDistTag must be latest");
   }
+  if (policy.releasePrefix === void 0) {
+    policy.releasePrefix = "";
+  } else if (
+    typeof policy.releasePrefix !== "string" ||
+    (policy.releasePrefix !== "" &&
+      !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(policy.releasePrefix))
+  ) {
+    throw new Error(
+      "npm releasePrefix must be empty or a lowercase letters-and-numbers slug",
+    );
+  }
   if (policy.versionStrategy === void 0) {
     policy.versionStrategy = "patch";
   } else if (!["patch", "conventional"].includes(policy.versionStrategy)) {

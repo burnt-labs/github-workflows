@@ -27,17 +27,37 @@ jobs:
       - id: version
         env:
           RELEASE_TAG: ${{ inputs.release-tag }}
+          RELEASE_PREFIX: ${{ fromJSON(needs.quality.outputs.npm-policy).releasePrefix }}
         run: |
-          VERSION="${RELEASE_TAG#v}"
+          VERSION="$RELEASE_TAG"
+          # A prefixed repository publishes only its own releases. Refusing a
+          # tag from another line is the point: in a repository that also
+          # deploys a Worker, publishing the release the Worker just cut would
+          # push an unrelated version to npm.
+          if [ -n "$RELEASE_PREFIX" ]; then
+            case "$VERSION" in
+              "$RELEASE_PREFIX"-v*) VERSION="${VERSION#"$RELEASE_PREFIX"-}" ;;
+              *)
+                echo "::notice::$RELEASE_TAG is not a $RELEASE_PREFIX- release; nothing to publish."
+                echo "version=" >> "$GITHUB_OUTPUT"
+                exit 0
+                ;;
+            esac
+          fi
+          VERSION="${VERSION#v}"
           if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::Release tag must be strict vMAJOR.MINOR.PATCH"
+            echo "::error::Release tag must be strict ${RELEASE_PREFIX:+$RELEASE_PREFIX-}vMAJOR.MINOR.PATCH"
             exit 1
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
   publish-release:
     needs: [quality, metadata]
-    if: fromJSON(needs.quality.outputs.npm-policy).promotionMode == 'manual'
+    # An empty version means the release belongs to another tag line in this
+    # repository — the Worker's, typically — and is not ours to publish.
+    if: >-
+      needs.metadata.outputs.version != '' &&
+      fromJSON(needs.quality.outputs.npm-policy).promotionMode == 'manual'
     permissions:
       contents: read
       id-token: write

@@ -90,3 +90,24 @@ test("BREAKING CHANGE only counts as a footer, not in a subject", () => {
     "patch",
   );
 });
+
+test("a prefixed package ignores an unprefixed release line", () => {
+  // provider-devtool, exactly: the Worker is at v0.1.21 and the package at
+  // 0.4.0. Reading the Worker's tags would publish the package as 0.1.22 — a
+  // version regression cut from a tag that has nothing to do with it.
+  const workerTags = ["v0.1.21", "v0.1.20", "v0.1.19"];
+  assert.equal(
+    nextReleaseVersion("0.4.0", workerTags, "types", "minor"),
+    "0.5.0",
+  );
+  // And the package's own line is what it follows once it exists.
+  assert.equal(
+    nextReleaseVersion(
+      "0.4.0",
+      [...workerTags, "types-v0.5.0"],
+      "types",
+      "minor",
+    ),
+    "0.6.0",
+  );
+});

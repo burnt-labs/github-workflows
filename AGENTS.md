@@ -206,10 +206,30 @@ is the cost of modelling one environment honestly.
   "access": "public", // only "public" is accepted
   "candidateDistTag": "next",
   "releaseDistTag": "latest", // must be "latest", and must differ from candidate
+  // Optional lowercase slug, same meaning as the deployment policy's. Required
+  // when the repository also runs a Cloudflare flow. See below.
+  "releasePrefix": "types",
   // Optional, defaults to "patch". See "Version strategy" below.
   "versionStrategy": "conventional",
 }
 ```
+
+#### `releasePrefix`, and when it is not optional
+
+Release tags are the version source, so two flows sharing one tag line means
+two independently versioned things sharing one version. Set `releasePrefix`
+whenever a repository publishes a package **and** deploys a Worker.
+
+`provider-devtool` is the worked example. Its Worker is at `v0.1.21`; its
+package `@burnt-labs/provider-registry-types` is at `0.4.0`. Unprefixed, the
+npm flow reads the Worker's tags and publishes the package as `0.1.22` — a
+version regression, cut from a tag that has nothing to do with it, and a
+GitHub release colliding with the Worker's line.
+
+With `"releasePrefix": "types"` the package tags as `types-v0.5.0`, reads only
+`types-v*` tags when computing the next version and the conventional commit
+range, and `npm-release.yml` skips any release whose tag belongs to another
+line rather than publishing it.
 
 #### Version strategy
 

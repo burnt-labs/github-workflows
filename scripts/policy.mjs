@@ -291,6 +291,27 @@ export function validateNpmPolicy(policy) {
     throw new Error("npm releaseDistTag must be latest");
   }
 
+  // Namespaces this package's release tags, exactly as the deployment policy's
+  // field namespaces a Worker's — `types` produces `types-v1.2.3`.
+  //
+  // Without it, a repository that runs BOTH flows has one release line for two
+  // independently versioned things, and the npm flow derives the package
+  // version from whatever the Cloudflare flow last tagged. `provider-devtool`
+  // is the worked example: the Worker is at `v0.1.21`, the package at `0.4.0`,
+  // and an unprefixed npm flow would publish the package as `0.1.22` — a
+  // version regression, cut from a tag that has nothing to do with it.
+  if (policy.releasePrefix === undefined) {
+    policy.releasePrefix = "";
+  } else if (
+    typeof policy.releasePrefix !== "string" ||
+    (policy.releasePrefix !== "" &&
+      !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(policy.releasePrefix))
+  ) {
+    throw new Error(
+      "npm releasePrefix must be empty or a lowercase letters-and-numbers slug",
+    );
+  }
+
   // How the next version is derived. `patch` increments the highest release
   // tag, which suits an application: the number orders releases and nothing
   // reads meaning into it.
