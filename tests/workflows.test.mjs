@@ -580,6 +580,42 @@ test("npm release metadata is namespace-scoped", () => {
   assert.match(commits.run, /tag_prefix/);
 });
 
+test("npm versions strip the namespace the tags carry", (t) => {
+  // The tag carries the namespace; the npm version must not. Stripping only
+  // `v` would hand npm `types-v1.2.3-rc.4` as a version, which it rejects.
+  const workflow = parse(fs.readFileSync(`${directory}/npm-main.yml`, "utf8"));
+  const versions = workflow.jobs.metadata.steps.find(
+    (step) => step.id === "versions",
+  );
+  assert.match(versions.env.RELEASE_PREFIX, /npm-policy\)\.releasePrefix/);
+  const outputDirectory = fs.mkdtempSync(
+    path.join(os.tmpdir(), "npm-versions-"),
+  );
+  t.after(() => fs.rmSync(outputDirectory, { recursive: true }));
+  for (const [index, [releasePrefix, candidateTag, releaseTag]] of [
+    ["types", "types-v1.2.3-rc.7", "types-v1.2.3"],
+    ["", "v1.2.3-rc.7", "v1.2.3"],
+  ].entries()) {
+    const outputFile = path.join(outputDirectory, `case-${index}`);
+    fs.writeFileSync(outputFile, "");
+    const result = spawnSync("bash", ["-euo", "pipefail", "-c", versions.run], {
+      env: {
+        ...process.env,
+        GITHUB_OUTPUT: outputFile,
+        RELEASE_PREFIX: releasePrefix,
+        CANDIDATE_TAG: candidateTag,
+        RELEASE_TAG: releaseTag,
+      },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(
+      fs.readFileSync(outputFile, "utf8"),
+      "candidate-version=1.2.3-rc.7\nrelease-version=1.2.3\n",
+      releasePrefix || "(none)",
+    );
+  }
+});
+
 test("npm release rejects tags from another namespace", (t) => {
   const workflow = parse(
     fs.readFileSync(`${directory}/npm-release.yml`, "utf8"),

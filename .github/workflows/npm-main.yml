@@ -89,12 +89,18 @@ jobs:
           RELEASE_TAGS="$(cat "$RUNNER_TEMP/release-tags.txt")" \
             node "$GITHUB_WORKSPACE/.burnt-workflows/scripts/release-metadata.mjs"
       - id: versions
+        # The tag carries the namespace; the npm version must not. Stripping
+        # only `v` would hand npm `types-v1.2.3-rc.4` as a version, which it
+        # rejects — so the configured prefix comes off with it.
         env:
           CANDIDATE_TAG: ${{ steps.metadata.outputs.candidate-tag }}
           RELEASE_TAG: ${{ steps.metadata.outputs.release-tag }}
+          RELEASE_PREFIX: ${{ fromJSON(needs.quality.outputs.npm-policy).releasePrefix }}
         run: |
-          echo "candidate-version=${CANDIDATE_TAG#v}" >> "$GITHUB_OUTPUT"
-          echo "release-version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
+          tag_prefix=""
+          if [ -n "$RELEASE_PREFIX" ]; then tag_prefix="${RELEASE_PREFIX}-"; fi
+          echo "candidate-version=${CANDIDATE_TAG#"$tag_prefix"v}" >> "$GITHUB_OUTPUT"
+          echo "release-version=${RELEASE_TAG#"$tag_prefix"v}" >> "$GITHUB_OUTPUT"
 
   publish-candidate:
     needs: [quality, metadata]
