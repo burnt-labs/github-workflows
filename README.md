@@ -167,7 +167,10 @@ SHA with a trailing version comment, so a compromised upstream tag cannot reach
 the jobs that hold deployment credentials. Dependabot advances the pins weekly
 and a test rejects any reference that is not a 40-character SHA.
 
-Workflows in this repository never create commits or push branches.
+Workflows in this repository never run `git commit` or `git push`, and the
+tag-derived flows never write versions back to a repository. The one
+write-back exception is the Changesets flow's version pull request,
+maintained through the GitHub API — see the invariant in AGENTS.md.
 
 ## npm
 

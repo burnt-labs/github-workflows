@@ -208,15 +208,21 @@ jobs:
       # covers everything this one would have done.
       - name: Verify this run is still the branch head
         id: freshness
+        # The ref name reaches the script through the environment, never
+        # interpolated into its source: a branch name is caller-controlled
+        # text, and expanding it inline would let shell syntax in the name
+        # execute.
         env:
           GH_TOKEN: ${{ github.token }}
+          REF_NAME: ${{ github.ref_name }}
+          RUN_SHA: ${{ github.sha }}
         run: |
-          head="$(gh api "repos/${{ github.repository }}/git/ref/heads/${{ github.ref_name }}" --jq .object.sha)"
-          if [ "$head" = "${{ github.sha }}" ]; then
+          head="$(gh api "repos/${{ github.repository }}/git/ref/heads/$REF_NAME" --jq .object.sha)"
+          if [ "$head" = "$RUN_SHA" ]; then
             echo "stale=false" >> "$GITHUB_OUTPUT"
           else
             echo "stale=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::${{ github.ref_name }} has moved to $head; standing down in favor of that commit's run."
+            echo "::notice::$REF_NAME has moved to $head; standing down in favor of that commit's run."
           fi
       - name: Create release pull request or publish to npm
         if: steps.freshness.outputs.stale == 'false'
