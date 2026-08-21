@@ -159,7 +159,10 @@ jobs:
           # credential. npm parses ini-style and trims whitespace around `=`,
           # so the patterns allow it too: `_authToken = <token>`
           # authenticates just as well.
-          for npmrc in "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}" .npmrc; do
+          # Both the repository root — where the action runs the version and
+          # publish commands — and this step's own working directory, which a
+          # policy may point elsewhere. Scanning a file twice is harmless.
+          for npmrc in "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}" "${GITHUB_WORKSPACE:-.}/.npmrc" .npmrc; do
             [ -f "$npmrc" ] || continue
             if grep -E '(_authToken|_auth|_password)[[:space:]]*=' "$npmrc" |
                grep -qvE '_authToken[[:space:]]*=[[:space:]]*(\$\{NODE_AUTH_TOKEN\})?[[:space:]]*$'; then
