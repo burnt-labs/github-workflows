@@ -4,6 +4,51 @@ This repository holds the organization's required quality workflow and the
 reusable deployment and publishing workflows. Consumer repositories contribute
 policy files and thin trigger workflows; everything else lives here.
 
+## The shape
+
+Two layers, hard boundary between them.
+
+**This repository is the platform layer.** It owns all logic, all
+conditionals, and all credential handling. Nothing outside it touches a
+secret, an OIDC token, or a publish/deploy decision. It is operated with
+batched releases, Dependabot advancing consumer pins, and a capped policy
+schema.
+
+**A consumer repository is a declaration layer.** Its `.github` contains
+exactly two kinds of things, and no logic in either:
+
+- **Policy files** — every repository-specific fact, commented JSONC,
+  schema-validated here. Configuration goes in policy, never inline in a
+  workflow.
+- **Trigger files** — thin callers of roughly ten lines with no `if:`
+  conditions. Each file exists only because GitHub attaches something
+  per-file that the flows need separated: trigger filters, a permissions
+  grant, a required-check identity, or a concurrency namespace. A file that
+  does not carry one of those should not exist; a single multiplexed "ci.yml"
+  is rejected because it must union every path's permissions onto every
+  event and replaces declarative `on:` filters with runs that no-op.
+  Repo-shaped odd jobs (a contract conformance check, a monitor) stay in the
+  consumer repository — they are not platform material.
+
+Routing rules, applied in order:
+
+1. A repository publishing **one** npm package uses the tag-derived flow
+   (`npm-main.yml` / `npm-release.yml`). **Two or more** interdependent
+   packages use `npm-changesets.yml`. See "Two npm flow shapes" below for
+   why the line is hard.
+2. The npm caller's filename is load-bearing: npmjs.com binds each package's
+   trusted publisher to one workflow file, so every publish must run from
+   that file. Under the tag flow that forces one file with two triggers; the
+   Changesets flow needs only a push trigger.
+3. A repository the standard cannot serve yet runs **sanctioned bespoke**
+   workflows: an in-repo flow whose header documents exactly which gaps keep
+   it off the standard, revisited when the standard grows. Silent divergence
+   is the failure mode; the gap list is what distinguishes an outlier from
+   drift.
+4. The policy schema grows only for needs two or more repositories share.
+   A knob wanted by exactly one repository means that repository stays
+   bespoke for that piece instead.
+
 ## Invariants
 
 These are not preferences. Changes that break them will be rejected.
