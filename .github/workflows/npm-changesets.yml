@@ -32,6 +32,14 @@
 # non-cancelling concurrency group — so a caller needs no concurrency of its
 # own, though adding one is harmless.
 #
+# Recovery contract for a publish that fails partway: `changeset publish`
+# is resumable. It skips versions that already exist on the registry, so a
+# failed run's next attempt — a re-run, or simply the next push — publishes
+# only what is missing and then pushes the tags. The pre-publish Build exists
+# so that build-class failures never reach the sequential publish at all;
+# what a partial publish can still mean is a registry-side failure, and the
+# fix is always "run it again", never manual registry surgery.
+#
 # Known, accepted exposure: changesets/action hands its environment —
 # GITHUB_TOKEN included — to the version and publish commands, which run
 # consumer code. That is inherent to the Changesets model (the changelog
@@ -166,7 +174,7 @@ jobs:
           # Consuming the full stream keeps the exit codes honest.
           for npmrc in "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}" "${GITHUB_WORKSPACE:-.}/.npmrc" .npmrc; do
             [ -f "$npmrc" ] || continue
-            if grep -E '(_authToken|_auth|_password|tokenHelper)[[:space:]]*=' "$npmrc" |
+            if grep -E '(_authToken|_auth|_password|tokenHelper|certfile|keyfile)[[:space:]]*=' "$npmrc" |
                grep -vE '_authToken[[:space:]]*=[[:space:]]*(\$\{NODE_AUTH_TOKEN\})?[[:space:]]*$' > /dev/null; then
               echo "::error::$npmrc carries a registry credential. This flow publishes with trusted publishing and must not carry one."
               exit 1
@@ -192,7 +200,26 @@ jobs:
       # multi-package publish.
       - name: Build
         run: ${{ fromJSON(needs.quality.outputs.quality-policy).commands.build }}
+      # The concurrency group serializes runs but does not order them: an
+      # older push whose quality job finished late can enter the group after
+      # a newer run and force-update the version pull request backwards,
+      # dropping the newer commit's changesets. A run that is no longer the
+      # branch head therefore stands down — the run for the newer commit
+      # covers everything this one would have done.
+      - name: Verify this run is still the branch head
+        id: freshness
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          head="$(gh api "repos/${{ github.repository }}/git/ref/heads/${{ github.ref_name }}" --jq .object.sha)"
+          if [ "$head" = "${{ github.sha }}" ]; then
+            echo "stale=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "stale=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::${{ github.ref_name }} has moved to $head; standing down in favor of that commit's run."
+          fi
       - name: Create release pull request or publish to npm
+        if: steps.freshness.outputs.stale == 'false'
         uses: changesets/action@a45c4d594aa4e2c509dc14a9f2b3b67ba3780d0d # v1.9.0
         with:
           title: ${{ inputs.pr-title }}

@@ -801,6 +801,10 @@ test("npm changesets flow publishes with OIDC and API commits only", () => {
   assert.match(validate.run, /repository root/);
   const publish = release.steps.at(-1);
   assert.equal(publish.with.commitMode, "github-api");
+  // A stale run — one whose branch has already moved on — must stand down
+  // rather than force-update the version pull request backwards.
+  assert.equal(publish.if, "steps.freshness.outputs.stale == 'false'");
+  assert.ok(release.steps.find((step) => step.id === "freshness"));
   // Provenance follows source visibility; the registry refuses it from
   // private repositories rather than degrading.
   assert.match(
@@ -864,6 +868,13 @@ test("npm changesets guard rejects real credentials, allows the placeholder", (t
     [
       "token helper",
       "//registry.npmjs.org/:tokenHelper=/usr/local/bin/npm-token\n",
+      null,
+      {},
+      1,
+    ],
+    [
+      "client certificate",
+      "//registry.npmjs.org/:certfile=/etc/ssl/npm.crt\n//registry.npmjs.org/:keyfile=/etc/ssl/npm.key\n",
       null,
       {},
       1,
