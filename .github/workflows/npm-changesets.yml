@@ -162,10 +162,14 @@ jobs:
           # Both the repository root — where the action runs the version and
           # publish commands — and this step's own working directory, which a
           # policy may point elsewhere. Scanning a file twice is harmless.
+          # No -q on the second grep: under the default shell's pipefail, -q
+          # exiting at the first hit can SIGPIPE the producer and turn the
+          # pipeline's status into 141, which reads as "no credential".
+          # Consuming the full stream keeps the exit codes honest.
           for npmrc in "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}" "${GITHUB_WORKSPACE:-.}/.npmrc" .npmrc; do
             [ -f "$npmrc" ] || continue
-            if grep -E '(_authToken|_auth|_password)[[:space:]]*=' "$npmrc" |
-               grep -qvE '_authToken[[:space:]]*=[[:space:]]*(\$\{NODE_AUTH_TOKEN\})?[[:space:]]*$'; then
+            if grep -E '(_authToken|_auth|_password|tokenHelper)[[:space:]]*=' "$npmrc" |
+               grep -vE '_authToken[[:space:]]*=[[:space:]]*(\$\{NODE_AUTH_TOKEN\})?[[:space:]]*$' > /dev/null; then
               echo "::error::$npmrc carries a registry credential. This flow publishes with trusted publishing and must not carry one."
               exit 1
             fi

@@ -849,6 +849,13 @@ test("npm changesets guard rejects real credentials, allows the placeholder", (t
     ["basic auth", "//registry.npmjs.org/:_auth=dXNlcjpwYXNz\n", null, {}, 1],
     ["password", "//registry.npmjs.org/:_password=cGFzcw==\n", null, {}, 1],
     [
+      "token helper",
+      "//registry.npmjs.org/:tokenHelper=/usr/local/bin/npm-token\n",
+      null,
+      {},
+      1,
+    ],
+    [
       "project npmrc credential",
       null,
       "//registry.npmjs.org/:_authToken=npm_realtoken\n",
