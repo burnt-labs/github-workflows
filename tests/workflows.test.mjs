@@ -700,3 +700,26 @@ test("D1 migrations run on deploy only and render from policy", (t) => {
     );
   }
 });
+
+test("npm publish runs package-scoped steps in the package directory", () => {
+  // npm-pr and npm-main already run in the npm policy's workingDirectory. In
+  // a workspace repository the quality directory is the root — that is where
+  // the lockfile and the install live — and `npm publish` from the root packs
+  // the private root package instead of the workspace package.
+  const workflow = parse(
+    fs.readFileSync(`${directory}/npm-publish.yml`, "utf8"),
+  );
+  const steps = workflow.jobs.publish.steps;
+  for (const name of [
+    "Set publish version without committing",
+    "Read package name",
+    "Publish with provenance when the source is public",
+  ]) {
+    const step = steps.find((step) => step.name === name);
+    assert.match(
+      step["working-directory"],
+      /npm-policy\)\.workingDirectory/,
+      name,
+    );
+  }
+});
