@@ -856,6 +856,16 @@ test("npm changesets guard rejects real credentials, allows the placeholder", (t
       1,
     ],
     ["project npmrc benign", null, "save-exact=true\n", {}, 0],
+    // The action runs version/publish from the repository root, which can
+    // differ from this step's working directory under a non-root quality
+    // policy — the workspace root .npmrc must be scanned from anywhere.
+    [
+      "workspace root credential from elsewhere",
+      null,
+      "workspace://registry.npmjs.org/:_authToken=npm_realtoken\n",
+      {},
+      1,
+    ],
   ];
   for (const [
     index,
@@ -876,8 +886,17 @@ test("npm changesets guard rejects real credentials, allows the placeholder", (t
       fs.writeFileSync(file, userRc);
       env.NPM_CONFIG_USERCONFIG = file;
     }
+    const workspace = fs.mkdtempSync(path.join(root, `ws-${index}-`));
+    env.GITHUB_WORKSPACE = workspace;
     if (projectRc !== null) {
-      fs.writeFileSync(path.join(cwd, ".npmrc"), projectRc);
+      if (projectRc.startsWith("workspace:")) {
+        fs.writeFileSync(
+          path.join(workspace, ".npmrc"),
+          projectRc.slice("workspace:".length),
+        );
+      } else {
+        fs.writeFileSync(path.join(cwd, ".npmrc"), projectRc);
+      }
     }
     const result = spawnSync("bash", ["-euo", "pipefail", "-c", guard.run], {
       cwd,
