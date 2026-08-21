@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   quality:
-    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@4a5c798ced51b5abcf298336215e19ec0e3b3dc2 # v1.4.0
+    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@46ae18b0f5ff1735e07601e41a6044b358379853 # v1.4.0
 
   pack:
     name: Package dry run
