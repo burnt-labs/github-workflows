@@ -21,14 +21,26 @@
 # What a caller provides:
 # - permissions: contents: write, pull-requests: write (the version pull
 #   request), id-token: write (trusted publishing)
-# - concurrency with cancel-in-progress: false — publishing then tagging must
-#   not be cancelled between the two
 # - the trusted publisher on npmjs.com for EVERY published package pointing
 #   at the CALLER's workflow file; OIDC identifies the top-level workflow,
 #   and npm allows one workflow per package, so all publishes must run from
 #   that one file
 # - version-command / publish-command when its scripts differ from the
 #   defaults; both run from the repository root
+#
+# Serialization is enforced here — the release job carries a per-repository,
+# non-cancelling concurrency group — so a caller needs no concurrency of its
+# own, though adding one is harmless.
+#
+# Known, accepted exposure: changesets/action hands its environment —
+# GITHUB_TOKEN included — to the version and publish commands, which run
+# consumer code. That is inherent to the Changesets model (the changelog
+# writers need the token to read pull-request metadata) and identical to the
+# bespoke changesets workflows this replaces; the quality gates, the
+# lockfile, and npm 12's install-time script denial are the compensating
+# controls. The tag-derived flow does not carry the token into consumer
+# commands, which is one more reason single-package repositories belong
+# there.
 
 name: Burnt npm Changesets
 
@@ -74,6 +86,13 @@ jobs:
     name: Version or publish
     needs: quality
     runs-on: ubicloud-standard-4
+    concurrency:
+      # Enforced here rather than trusted to the caller: two concurrent runs
+      # both force-update Changesets' changeset-release branch, and NOT
+      # cancel-in-progress because a run cancelled between publishing and
+      # tagging leaves versions on the registry with nothing behind them.
+      group: npm-changesets-${{ github.repository }}
+      cancel-in-progress: false
     permissions:
       # The version pull request, and the tags and releases Changesets
       # creates after publishing.
@@ -113,6 +132,41 @@ jobs:
             echo "::error::Expected npm 12 on PATH, found $(npm --version). Something is shadowing the pinned CLI."
             exit 1
           fi
+      # Before Install, matching npm-publish.yml: a credential this guard
+      # would reject must fail the job before any consumer lifecycle or build
+      # code has had it in scope. This checks what npm will actually
+      # authenticate with, NOT whether a token exists somewhere in secrets —
+      # reading org-level secrets into the environment to assert they are
+      # empty reports the organization's configuration, not this job's, and
+      # fails repositories that never handed npm anything.
+      - name: Verify trusted-publishing credentials
+        run: |
+          if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+            echo "::error::No OIDC token available. The calling workflow must grant id-token: write."
+            exit 1
+          fi
+          if [ -n "${NODE_AUTH_TOKEN:-}" ] || [ -n "${NPM_TOKEN:-}" ]; then
+            echo "::error::An npm token is present. This flow publishes with trusted publishing and must not carry one."
+            exit 1
+          fi
+          # Both the generated user config and the repository's own .npmrc,
+          # and every credential key npm accepts — `_auth` and `_password`
+          # authenticate a registry just as `_authToken` does. setup-node
+          # writes an `_authToken` line holding the LITERAL text of the
+          # interpolation placeholder — the action does not expand it, npm
+          # does, at read time (actions/setup-node, src/authutil.ts) — so the
+          # placeholder is expected content and must not be read as a
+          # credential. npm parses ini-style and trims whitespace around `=`,
+          # so the patterns allow it too: `_authToken = <token>`
+          # authenticates just as well.
+          for npmrc in "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}" .npmrc; do
+            [ -f "$npmrc" ] || continue
+            if grep -E '(_authToken|_auth|_password)[[:space:]]*=' "$npmrc" |
+               grep -qvE '_authToken[[:space:]]*=[[:space:]]*(\$\{NODE_AUTH_TOKEN\})?[[:space:]]*$'; then
+              echo "::error::$npmrc carries a registry credential. This flow publishes with trusted publishing and must not carry one."
+              exit 1
+            fi
+          done
       - name: Install
         run: ${{ fromJSON(needs.quality.outputs.quality-policy).commands.install }}
       # Build before publishing rather than leaning on per-package
@@ -121,38 +175,6 @@ jobs:
       # multi-package publish.
       - name: Build
         run: ${{ fromJSON(needs.quality.outputs.quality-policy).commands.build }}
-      # This checks what npm will actually authenticate with, NOT whether a
-      # token exists somewhere in scope — reading org-level secrets into the
-      # environment to assert they are empty reports the organization's
-      # configuration, not this job's, and fails repositories that never
-      # handed npm anything. What decides the outcome is NODE_AUTH_TOKEN,
-      # which setup-node's generated npmrc interpolates at read time; this
-      # flow never sets it, so npm falls through to OIDC.
-      - name: Verify trusted-publishing credentials
-        run: |
-          if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
-            echo "::error::No OIDC token available. The calling workflow must grant id-token: write."
-            exit 1
-          fi
-          if [ -n "${NODE_AUTH_TOKEN:-}" ]; then
-            echo "::error::An npm token is present. This flow publishes with trusted publishing and must not carry one."
-            exit 1
-          fi
-          # setup-node writes an `_authToken` line holding the LITERAL text
-          # of the interpolation placeholder — the action does not expand it,
-          # npm does, at read time (actions/setup-node, src/authutil.ts). So
-          # the placeholder is expected content and must not be read as a
-          # credential; what this rejects is `_authToken` set to anything
-          # else, a hardcoded token committed or injected into the file. npm
-          # parses ini-style and trims whitespace around `=`, so the patterns
-          # allow it too — `_authToken = <token>` authenticates just as well.
-          npmrc="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
-          if [ -f "$npmrc" ] &&
-             grep -E '_authToken[[:space:]]*=' "$npmrc" |
-             grep -qvE '_authToken[[:space:]]*=[[:space:]]*(\$\{NODE_AUTH_TOKEN\})?[[:space:]]*$'; then
-            echo "::error::$npmrc sets _authToken to a literal credential. This flow publishes with trusted publishing and must not carry one."
-            exit 1
-          fi
       - name: Create release pull request or publish to npm
         uses: changesets/action@a45c4d594aa4e2c509dc14a9f2b3b67ba3780d0d # v1.9.0
         with:

@@ -177,7 +177,7 @@ publish when it lands — in the same trusted-publishing posture as the rest of
 the family. The tag-derived flows below are for repositories publishing one
 package.
 
-The npm workflow family performs a package dry run on pull requests, publishes
+The tag-derived pair performs a package dry run on pull requests, publishes
 `v<version>-rc.<run>` with the `next` dist-tag from main, and publishes the
 stable version with `latest` after manual or automatic promotion. Publishing
 uses npm trusted publishing through GitHub OIDC, with provenance when the

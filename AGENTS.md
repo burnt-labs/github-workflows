@@ -9,8 +9,13 @@ policy files and thin trigger workflows; everything else lives here.
 These are not preferences. Changes that break them will be rejected.
 
 - Keep every commit signed.
-- Workflows must never create commits or push branches. Version numbers are
-  derived from release tags, never written back to the repository.
+- Workflows must never run `git commit` or `git push`, and the tag-derived
+  flows never write versions back to a repository. The one authorized
+  exception to write-back: `npm-changesets.yml` maintains its version pull
+  request and release tags through the GitHub API (`commitMode: github-api`)
+  — that write-back is Changesets' entire contract and the reason the flow
+  exists, and API commits are signed by GitHub, which branch protection
+  wants. Nothing may extend this exception to the git CLI.
 - Reusable deployment jobs must use the caller repository's actual target
   environment. Do not introduce `preview` or `preview-*` environments.
 - Candidate and release are semantic roles, mapped by repository policy.

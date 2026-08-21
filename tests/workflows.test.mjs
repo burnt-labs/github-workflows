@@ -771,9 +771,21 @@ test("npm changesets flow publishes with OIDC and API commits only", () => {
   const workflow = parse(source);
   const release = workflow.jobs.release;
   assert.equal(release.permissions["id-token"], "write");
+  // Serialization is enforced here, not trusted to the caller: concurrent
+  // runs force-update the changeset-release branch, and a cancel between
+  // publish and tagging leaves registry versions with nothing behind them.
+  assert.match(release.concurrency.group, /github\.repository/);
+  assert.equal(release.concurrency["cancel-in-progress"], false);
   const checkout = release.steps[0];
   assert.equal(checkout.with["fetch-depth"], 0);
   assert.equal(checkout.with["persist-credentials"], false);
+  // The guard runs before any consumer code: a credential it would reject
+  // must never have been in scope for install or build scripts.
+  const stepNames = release.steps.map((step) => step.name);
+  assert.ok(
+    stepNames.indexOf("Verify trusted-publishing credentials") <
+      stepNames.indexOf("Install"),
+  );
   const publish = release.steps.at(-1);
   assert.equal(publish.with.commitMode, "github-api");
   // Provenance follows source visibility; the registry refuses it from
@@ -795,64 +807,80 @@ test("npm changesets guard rejects real credentials, allows the placeholder", (t
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "npmrc-guard-"));
   t.after(() => fs.rmSync(root, { recursive: true }));
   const cases = [
-    // [description, npmrc content or null, NODE_AUTH_TOKEN, OIDC url, status]
-    ["no oidc", null, "", "", 1],
-    ["env token", null, "npm_x", "https://oidc", 1],
-    ["no npmrc", null, "", "https://oidc", 0],
+    // [label, user npmrc, project npmrc, env overrides, expected status]
+    ["no oidc", null, null, { ACTIONS_ID_TOKEN_REQUEST_URL: "" }, 1],
+    ["env NODE_AUTH_TOKEN", null, null, { NODE_AUTH_TOKEN: "npm_x" }, 1],
+    ["env NPM_TOKEN", null, null, { NPM_TOKEN: "npm_x" }, 1],
+    ["no npmrc anywhere", null, null, {}, 0],
     [
       "placeholder",
       "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}\n",
-      "",
-      "https://oidc",
+      null,
+      {},
       0,
     ],
-    [
-      "empty value",
-      "//registry.npmjs.org/:_authToken=\n",
-      "",
-      "https://oidc",
-      0,
-    ],
+    ["empty value", "//registry.npmjs.org/:_authToken=\n", null, {}, 0],
     [
       "literal credential",
       "//registry.npmjs.org/:_authToken=npm_realtoken\n",
-      "",
-      "https://oidc",
+      null,
+      {},
       1,
     ],
     // npm's ini parser trims whitespace around `=`, so this authenticates —
     // the guard has to see through the spacing (caught in review of the
-    // original guard).
+    // guard's first incarnation).
     [
       "literal credential with spaces",
       "//registry.npmjs.org/:_authToken = npm_realtoken\n",
-      "",
-      "https://oidc",
+      null,
+      {},
       1,
     ],
     [
       "placeholder with spaces",
       "//registry.npmjs.org/:_authToken =${NODE_AUTH_TOKEN}\n",
-      "",
-      "https://oidc",
+      null,
+      {},
       0,
     ],
+    // The other credential keys npm accepts authenticate a registry just as
+    // _authToken does, and a project .npmrc is read by npm like the user one.
+    ["basic auth", "//registry.npmjs.org/:_auth=dXNlcjpwYXNz\n", null, {}, 1],
+    ["password", "//registry.npmjs.org/:_password=cGFzcw==\n", null, {}, 1],
+    [
+      "project npmrc credential",
+      null,
+      "//registry.npmjs.org/:_authToken=npm_realtoken\n",
+      {},
+      1,
+    ],
+    ["project npmrc benign", null, "save-exact=true\n", {}, 0],
   ];
   for (const [
     index,
-    [label, npmrc, token, oidc, expected],
+    [label, userRc, projectRc, extra, expected],
   ] of cases.entries()) {
-    const env = { ...process.env, ACTIONS_ID_TOKEN_REQUEST_URL: oidc };
+    const cwd = fs.mkdtempSync(path.join(root, `cwd-${index}-`));
+    const env = {
+      ...process.env,
+      ACTIONS_ID_TOKEN_REQUEST_URL: "https://oidc",
+      NPM_CONFIG_USERCONFIG: path.join(cwd, "absent-user-npmrc"),
+      ...extra,
+    };
     delete env.NODE_AUTH_TOKEN;
-    if (token) env.NODE_AUTH_TOKEN = token;
-    if (npmrc === null) {
-      env.NPM_CONFIG_USERCONFIG = path.join(root, `absent-${index}`);
-    } else {
-      const file = path.join(root, `npmrc-${index}`);
-      fs.writeFileSync(file, npmrc);
+    delete env.NPM_TOKEN;
+    Object.assign(env, extra);
+    if (userRc !== null) {
+      const file = path.join(cwd, "user-npmrc");
+      fs.writeFileSync(file, userRc);
       env.NPM_CONFIG_USERCONFIG = file;
     }
+    if (projectRc !== null) {
+      fs.writeFileSync(path.join(cwd, ".npmrc"), projectRc);
+    }
     const result = spawnSync("bash", ["-euo", "pipefail", "-c", guard.run], {
+      cwd,
       env,
     });
     assert.equal(result.status, expected, `${label}: ${result.stderr}`);
