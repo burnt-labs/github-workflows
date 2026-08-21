@@ -49,6 +49,16 @@
 # controls. The tag-derived flow does not carry the token into consumer
 # commands, which is one more reason single-package repositories belong
 # there.
+#
+# The same acceptance covers OIDC: permissions are job-scoped, so consumer
+# install, build, and prepublishOnly code runs in the job that holds
+# id-token: write — here and in npm-publish.yml alike. Splitting the build
+# into a tokenless job would not close this: `changeset publish` still
+# executes each package's prepublishOnly under OIDC, and a dependency able
+# to exfiltrate the token could as easily poison the artifact a split job
+# would hand over. The boundary that actually holds is the lockfile and the
+# gates in front of it — and the token itself mints only this repository's
+# own publish identity.
 
 name: Burnt npm Changesets
 
