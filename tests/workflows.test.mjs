@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import { parse } from "yaml";
 
@@ -558,4 +560,143 @@ test("npm promotes next before latest", () => {
   );
   assert.match(source, /candidateDistTag/);
   assert.match(source, /releaseDistTag/);
+});
+
+test("npm release metadata is namespace-scoped", () => {
+  const source = fs.readFileSync(`${directory}/npm-main.yml`, "utf8");
+  // Both the version derivation and the conventional commit range must read
+  // only this flow's tags. Without the prefix, a repository whose Worker
+  // deploy flow also cuts releases would seed the package version — and the
+  // commit range — from whatever that flow released last.
+  const workflow = parse(source);
+  const metadata = workflow.jobs.metadata.steps.find(
+    (step) => step.id === "metadata",
+  );
+  assert.match(metadata.env.RELEASE_PREFIX, /npm-policy\)\.releasePrefix/);
+  const commits = workflow.jobs.metadata.steps.find(
+    (step) => step.name === "Read commits since the last release",
+  );
+  assert.match(commits.env.RELEASE_PREFIX, /npm-policy\)\.releasePrefix/);
+  assert.match(commits.run, /tag_prefix/);
+});
+
+test("npm release rejects tags from another namespace", (t) => {
+  const workflow = parse(
+    fs.readFileSync(`${directory}/npm-release.yml`, "utf8"),
+  );
+  const guard = workflow.jobs.metadata.steps.find(
+    (step) => step.id === "version",
+  );
+  assert.match(guard.env.RELEASE_PREFIX, /npm-policy\)\.releasePrefix/);
+  const outputDirectory = fs.mkdtempSync(
+    path.join(os.tmpdir(), "npm-release-guard-"),
+  );
+  t.after(() => fs.rmSync(outputDirectory, { recursive: true }));
+  for (const [releasePrefix, releaseTag, expectedStatus, version] of [
+    ["types", "types-v1.2.3", 0, "1.2.3"],
+    ["types", "v1.2.3", 1],
+    ["types", "web-v1.2.3", 1],
+    ["types", "types-v1.2.3-rc.7", 1],
+    ["", "v1.2.3", 0, "1.2.3"],
+    ["", "types-v1.2.3", 1],
+    ["", "1.2.3", 1],
+  ]) {
+    const outputFile = path.join(
+      outputDirectory,
+      `${releasePrefix || "none"}-${releaseTag}`,
+    );
+    fs.writeFileSync(outputFile, "");
+    const result = spawnSync("bash", ["-euo", "pipefail", "-c", guard.run], {
+      env: {
+        ...process.env,
+        GITHUB_OUTPUT: outputFile,
+        RELEASE_PREFIX: releasePrefix,
+        RELEASE_TAG: releaseTag,
+      },
+    });
+    assert.equal(
+      result.status,
+      expectedStatus,
+      `${releasePrefix || "(none)"}/${releaseTag}: ${result.stderr}`,
+    );
+    if (expectedStatus === 0) {
+      assert.match(
+        fs.readFileSync(outputFile, "utf8"),
+        new RegExp(`version=${version}`),
+      );
+    }
+  }
+});
+
+test("npm provenance follows source repository visibility", () => {
+  // The registry refuses provenance from a private source repository with
+  // E422 instead of publishing without the attestation, so the flag has to
+  // follow visibility. The flag must sit on the && side of the fragment —
+  // the idiom returns the last evaluated operand and '' is falsy, so the
+  // reversed form would emit the flag every time.
+  const source = fs.readFileSync(`${directory}/npm-publish.yml`, "utf8");
+  assert.match(
+    source,
+    /github\.event\.repository\.private == false && '--provenance' \|\| ''/,
+  );
+});
+
+test("D1 migrations run on deploy only and render from policy", (t) => {
+  const workflow = parse(
+    fs.readFileSync(`${directory}/cloudflare-version.yml`, "utf8"),
+  );
+  const steps = workflow.jobs.version.steps;
+  const plan = steps.find((step) => step.name === "Plan D1 migrations");
+  const apply = steps.find((step) => step.name === "Apply D1 migrations");
+  // Deploy only: a preview must not mutate the target's database, the same
+  // boundary the Worker secrets steps draw.
+  assert.match(plan.if, /inputs\.operation == 'deploy'/);
+  assert.match(plan.if, /d1Migrations\[0\] != null/);
+  assert.equal(apply.if, "steps.d1-migrations.outcome == 'success'");
+  // Migrations resolve against the same wrangler configuration the deploy
+  // reads, and land before the version that needs them goes live.
+  assert.match(
+    apply.with.workingDirectory,
+    /deployment-policy\)\.workingDirectory/,
+  );
+  assert.match(apply.with.command, /steps\.d1-migrations\.outputs\.commands/);
+  assert.ok(
+    steps.indexOf(apply) <
+      steps.findIndex(
+        (step) => step.name === "Upload or deploy Worker version",
+      ),
+  );
+
+  const outputDirectory = fs.mkdtempSync(
+    path.join(os.tmpdir(), "d1-migrations-"),
+  );
+  t.after(() => fs.rmSync(outputDirectory, { recursive: true }));
+  for (const [index, [envFlag, expected]] of [
+    [
+      "",
+      "d1 migrations apply DEVTOOL_DB --remote\n" +
+        "d1 migrations apply provider-db --remote\n",
+    ],
+    [
+      "--env mainnet",
+      "d1 migrations apply DEVTOOL_DB --remote --env mainnet\n" +
+        "d1 migrations apply provider-db --remote --env mainnet\n",
+    ],
+  ].entries()) {
+    const outputFile = path.join(outputDirectory, `case-${index}`);
+    fs.writeFileSync(outputFile, "");
+    const result = spawnSync("bash", ["-euo", "pipefail", "-c", plan.run], {
+      env: {
+        ...process.env,
+        GITHUB_OUTPUT: outputFile,
+        DATABASES: JSON.stringify(["DEVTOOL_DB", "provider-db"]),
+        ENV_FLAG: envFlag,
+      },
+    });
+    assert.equal(result.status, 0, `${envFlag}: ${result.stderr}`);
+    assert.equal(
+      fs.readFileSync(outputFile, "utf8"),
+      `commands<<D1_COMMANDS\n${expected}D1_COMMANDS\n`,
+    );
+  }
 });

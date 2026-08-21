@@ -106,6 +106,52 @@ jobs:
         run: ${{ fromJSON(inputs.quality-policy).commands.install }}
       - name: Build
         run: ${{ fromJSON(inputs.quality-policy).commands.build }}
+      # D1 migrations declared in the deployment policy apply here, before the
+      # new version deploys, so the schema the code was written against exists
+      # by the time that code serves. Deploy only, never preview — the same
+      # boundary Worker secrets draw below: a preview must not mutate the
+      # target's database, and under chain topology "the target's database" is
+      # mainnet's.
+      #
+      # Two steps for a mundane reason, not the secrets steps' trust split:
+      # wrangler-action takes a literal command string, and the policy holds a
+      # list, so a plain step renders the list into one command per line first.
+      # `d1 migrations apply` is idempotent — already-applied migrations are
+      # skipped — so a re-run or a second target on the same database is safe.
+      - name: Plan D1 migrations
+        id: d1-migrations
+        if: >-
+          inputs.operation == 'deploy' &&
+          fromJSON(inputs.deployment-policy).d1Migrations[0] != null
+        env:
+          DATABASES: ${{ toJSON(fromJSON(inputs.deployment-policy).d1Migrations) }}
+          ENV_FLAG: ${{ fromJSON(inputs.deployment-policy).topology != 'single' && format('--env {0}', fromJSON(inputs.deployment-policy).targets[inputs.target].wranglerEnv) || '' }}
+        run: |
+          {
+            echo 'commands<<D1_COMMANDS'
+            # Database names are validated to a letters-digits-hyphens shape,
+            # so interpolating them into a command line cannot smuggle flags.
+            jq -r --arg env "$ENV_FLAG" \
+              '.[] | "d1 migrations apply \(.) --remote" + (if $env == "" then "" else " \($env)" end)' \
+              <<< "$DATABASES"
+            echo 'D1_COMMANDS'
+          } >> "$GITHUB_OUTPUT"
+      - name: Apply D1 migrations
+        if: steps.d1-migrations.outcome == 'success'
+        # The same pinned action as the deploy below, for the same reason the
+        # secrets step uses it: wrangler out of the consumer's node_modules
+        # would put a caller-resolved binary next to the deployment credential.
+        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
+        with:
+          apiToken: ${{ secrets.cloudflare-api-token || secrets.BURNT_CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.cloudflare-account-id || secrets.BURNT_CLOUDFLARE_ACCOUNT_ID }}
+          # deployment-policy.workingDirectory, matching the deploy step: the
+          # migrations directory resolves relative to the same wrangler
+          # configuration the deploy reads, so the schema applied is the one
+          # the deployed Worker was built against.
+          workingDirectory: ${{ fromJSON(inputs.deployment-policy).workingDirectory }}
+          packageManager: ${{ fromJSON(inputs.deployment-policy).packageManager }}
+          command: ${{ steps.d1-migrations.outputs.commands }}
       # Developers do not have Cloudflare access, so `wrangler secret put` is not
       # available to them and GitHub is the only place they can hold a secret.
       # This carries the declared ones across.

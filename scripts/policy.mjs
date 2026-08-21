@@ -183,6 +183,33 @@ export function validateDeploymentPolicy(policy) {
     }
   }
 
+  // D1 databases whose migrations apply before each deploy, by binding or
+  // database name — whichever `wrangler d1 migrations apply` should receive.
+  // In policy for the same reason workerSecrets is: the alternative is every
+  // consumer hand-rolling a migration job beside the shared flow, each with
+  // its own wrangler pin and its own credential handling.
+  if (policy.d1Migrations === undefined) {
+    policy.d1Migrations = [];
+  } else if (!Array.isArray(policy.d1Migrations)) {
+    throw new Error("deployment d1Migrations must be an array");
+  } else {
+    const seen = new Set();
+    for (const name of policy.d1Migrations) {
+      requireString(name, "deployment d1Migrations entry");
+      // The name is interpolated into a wrangler command line, so the
+      // character set is the safety property, not just hygiene.
+      if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(name)) {
+        throw new Error(
+          `deployment d1Migrations entry ${name} must be a D1 binding or database name`,
+        );
+      }
+      if (seen.has(name)) {
+        throw new Error(`deployment d1Migrations lists ${name} twice`);
+      }
+      seen.add(name);
+    }
+  }
+
   // Normalized rather than read as an optional key, because a missing key
   // reaches workflow `if:` conditions as null, and GitHub casts both null and
   // false to 0 when comparing across types. Emitting an explicit boolean keeps
@@ -307,6 +334,23 @@ export function validateNpmPolicy(policy) {
     policy.versionStrategy = "patch";
   } else if (!["patch", "conventional"].includes(policy.versionStrategy)) {
     throw new Error("npm versionStrategy must be patch or conventional");
+  }
+
+  // Same rule and same purpose as the deployment policy's releasePrefix. A
+  // repository whose releases are not all npm releases — a Worker deploy flow
+  // beside a package flow, or several packages — needs each flow reading only
+  // its own tags. Without a prefix the npm flow derives the next version from
+  // whatever `vX.Y.Z` release is highest, including ones another flow cut.
+  if (policy.releasePrefix === undefined) {
+    policy.releasePrefix = "";
+  } else if (
+    typeof policy.releasePrefix !== "string" ||
+    (policy.releasePrefix !== "" &&
+      !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(policy.releasePrefix))
+  ) {
+    throw new Error(
+      "npm releasePrefix must be empty or a lowercase letters-and-numbers slug",
+    );
   }
   return policy;
 }

@@ -161,6 +161,9 @@ caller job that consumes this output.
   // Optional. GitHub Environment secret names published as Worker secrets
   // before each deploy. See "Worker secrets" below.
   "workerSecrets": ["STYTCH_SECRET"],
+  // Optional. D1 databases whose migrations apply before each deploy. See
+  // "D1 migrations" below.
+  "d1Migrations": ["DEVTOOL_DB"],
   // Optional, defaults to true. See "Where the release target is previewed".
   "previewReleaseOnMain": false,
   "targets": {
@@ -208,6 +211,13 @@ is the cost of modelling one environment honestly.
   "releaseDistTag": "latest", // must be "latest", and must differ from candidate
   // Optional, defaults to "patch". See "Version strategy" below.
   "versionStrategy": "conventional",
+  // Optional lowercase slug, same rule as the deployment policy's. Namespaces
+  // this flow's release tags — "types" produces "types-v1.2.3" — so a
+  // repository whose Worker deploys also cut releases keeps the two histories
+  // apart. Without it, the npm flow reads whatever "vX.Y.Z" release is
+  // highest, including ones another flow cut, and derives the next package
+  // version and the conventional commit range from it.
+  "releasePrefix": "types",
 }
 ```
 
@@ -246,8 +256,13 @@ Opting in makes the main flow check out full history and tags, because the
 commit range has to be readable. Nothing is written back — the bump is derived,
 not recorded.
 
-Publishing uses npm trusted publishing through GitHub OIDC with provenance. It
-never accepts an npm token — do not add one. `npm-publish.yml` fails before it
+Publishing uses npm trusted publishing through GitHub OIDC, with provenance
+when the source repository is public. The registry refuses provenance from a
+private repository outright — E422, not a publish without the attestation — so
+the flag follows repository visibility: a private repository publishes through
+the same OIDC path without attesting, and starts attesting the moment it goes
+public, with no workflow change. Publishing never accepts an npm token — do
+not add one. `npm-publish.yml` fails before it
 installs anything if no OIDC token is available, because a caller that forgot
 `id-token: write` otherwise fails much later inside `npm publish`, as an
 authentication error that reads like a registry problem.
@@ -358,6 +373,33 @@ Callers that use this must pass `secrets: inherit` rather than the two named
 secrets, because inherited secrets arrive under their own names. Both forms
 work: `cloudflare-version.yml` resolves `cloudflare-api-token` first and falls
 back to `BURNT_CLOUDFLARE_API_TOKEN`, and fails loudly if neither is present.
+
+### D1 migrations
+
+Repositories with a D1 database otherwise end up with a hand-rolled migration
+job beside the shared flow — its own wrangler pin, its own credential handling,
+its own ordering guarantees. Declaring the databases in policy puts the
+migration inside the deploy instead:
+
+```jsonc
+{
+  "d1Migrations": ["DEVTOOL_DB"],
+}
+```
+
+Before `cloudflare-version.yml` deploys a version, it runs
+`wrangler d1 migrations apply <name> --remote` for each declared name — binding
+or database name, whichever wrangler should receive — from the deployment
+policy's `workingDirectory`, so the migrations directory resolves against the
+same wrangler configuration the deploy reads and the schema applied is the one
+the deployed Worker was built against. Under `standard` and `chain` topologies
+the target's `--env` is passed, so each environment migrates its own database.
+
+**Migrations apply on deploy, never on preview** — the same boundary Worker
+secrets draw. A preview must not mutate the target's database; on a `chain`
+repository the release target's database is mainnet's. `d1 migrations apply` is
+idempotent, so a re-run or a second deploy against an already-migrated database
+applies nothing and succeeds.
 
 ```yaml
 jobs:

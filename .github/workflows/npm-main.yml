@@ -42,19 +42,32 @@ jobs:
             > "$RUNNER_TEMP/release-tags.txt"
       - name: Read commits since the last release
         env:
+          RELEASE_PREFIX: ${{ fromJSON(needs.quality.outputs.npm-policy).releasePrefix }}
           VERSION_STRATEGY: ${{ fromJSON(needs.quality.outputs.npm-policy).versionStrategy }}
         run: |
           : > "$RUNNER_TEMP/commit-messages.txt"
           if [ "$VERSION_STRATEGY" != "conventional" ]; then
             exit 0
           fi
-          # The newest stable tag that exists in this clone. A tag named by a
-          # release but never pushed as a git ref would otherwise make `git log`
-          # fail; fall back to the whole history, which is correct for a first
-          # release and merely verbose afterwards.
+          # The newest stable tag IN THIS FLOW'S NAMESPACE that exists in this
+          # clone. Filtering by prefix matters in a repository with more than
+          # one release flow: without it, the newest stable release is whatever
+          # another flow cut last — a Worker deploy, say — and the commit range
+          # read here would start there instead of at the package's own last
+          # release. A tag named by a release but never pushed as a git ref
+          # would otherwise make `git log` fail; fall back to the whole
+          # history, which is correct for a first release and merely verbose
+          # afterwards.
+          tag_prefix=""
+          if [ -n "$RELEASE_PREFIX" ]; then tag_prefix="${RELEASE_PREFIX}-"; fi
           last=""
           while read -r tag; do
             [ -n "$tag" ] || continue
+            # The prefix is a validated lowercase slug, so interpolating it
+            # into the pattern cannot change the pattern's shape.
+            if [[ ! "$tag" =~ ^${tag_prefix}v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              continue
+            fi
             if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
               last="$tag"
               break
@@ -68,6 +81,7 @@ jobs:
       - id: metadata
         env:
           GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          RELEASE_PREFIX: ${{ fromJSON(needs.quality.outputs.npm-policy).releasePrefix }}
           VERSION_FILE: ${{ fromJSON(needs.quality.outputs.npm-policy).versionFile }}
           VERSION_STRATEGY: ${{ fromJSON(needs.quality.outputs.npm-policy).versionStrategy }}
           COMMIT_MESSAGES_FILE: ${{ runner.temp }}/commit-messages.txt

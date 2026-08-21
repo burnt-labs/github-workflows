@@ -25,12 +25,23 @@ jobs:
       version: ${{ steps.version.outputs.version }}
     steps:
       - id: version
+        # The prefix check is a namespace guard, same as cloudflare-release's:
+        # in a repository with more than one release flow, this workflow
+        # receives `release` events for every flow's tags, and publishing a
+        # package because a Worker release was cut is exactly the confusion
+        # the prefix exists to prevent. A tag outside this flow's namespace is
+        # an error, not a skip — the caller is expected to filter, so reaching
+        # here with a foreign tag means the routing is wrong.
         env:
+          RELEASE_PREFIX: ${{ fromJSON(needs.quality.outputs.npm-policy).releasePrefix }}
           RELEASE_TAG: ${{ inputs.release-tag }}
         run: |
-          VERSION="${RELEASE_TAG#v}"
-          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::Release tag must be strict vMAJOR.MINOR.PATCH"
+          tag_prefix=""
+          if [ -n "$RELEASE_PREFIX" ]; then tag_prefix="${RELEASE_PREFIX}-"; fi
+          VERSION="${RELEASE_TAG#"$tag_prefix"v}"
+          if [ "$RELEASE_TAG" = "$VERSION" ] ||
+             ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Release tag $RELEASE_TAG does not belong to ${RELEASE_PREFIX:-the default release namespace} or is not strict ${tag_prefix}vMAJOR.MINOR.PATCH"
             exit 1
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"

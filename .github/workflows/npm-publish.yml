@@ -100,13 +100,25 @@ jobs:
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
-      - name: Publish with provenance
+      - name: Publish with provenance when the source is public
         if: steps.existing.outputs.exists == 'false'
+        # The registry only accepts provenance from public source repositories
+        # — a private repository's publish is refused outright with E422, not
+        # published without the attestation. Provenance is therefore gated on
+        # visibility rather than requested unconditionally: a private
+        # repository publishes via the same OIDC trusted publishing, just
+        # without the attestation, and starts attesting the moment it goes
+        # public with no workflow change.
+        #
+        # The fragment keeps `--provenance` on the && side and '' on the ||
+        # side. The idiom returns the last evaluated operand and '' is falsy,
+        # so the reversed form — condition && '' || flag — would emit the flag
+        # every time (see the same trap documented in cloudflare-version.yml).
         run: >-
           npm publish
           --access ${{ fromJSON(inputs.npm-policy).access }}
           --tag ${{ inputs.dist-tag }}
-          --provenance
+          ${{ github.event.repository.private == false && '--provenance' || '' }}
       - name: Report package
         run: |
           {
@@ -114,4 +126,5 @@ jobs:
             echo "- Package: \`${{ steps.package.outputs.name }}@${{ inputs.version }}\`"
             echo "- Dist-tag: \`${{ inputs.dist-tag }}\`"
             echo "- Already existed: \`${{ steps.existing.outputs.exists }}\`"
+            echo "- Provenance: \`${{ github.event.repository.private == false }}\`"
           } >> "$GITHUB_STEP_SUMMARY"

@@ -155,6 +155,7 @@ test("deployment accepts only exact topology environments", () => {
       previewReleaseOnMain: true,
       releasePrefix: "",
       workerSecrets: [],
+      d1Migrations: [],
     });
   }
 });
@@ -247,6 +248,50 @@ test("workerSecrets rejects malformed and duplicated names", () => {
   const notArray = deploymentPolicy();
   notArray.workerSecrets = "API_KEY";
   assert.throws(() => validateDeploymentPolicy(notArray), /must be an array/);
+});
+
+test("d1Migrations accepts binding and database names, defaults empty", () => {
+  assert.deepEqual(
+    validateDeploymentPolicy(deploymentPolicy()).d1Migrations,
+    [],
+  );
+
+  const named = deploymentPolicy();
+  named.d1Migrations = ["DEVTOOL_DB", "provider-registry-db"];
+  assert.deepEqual(validateDeploymentPolicy(named).d1Migrations, [
+    "DEVTOOL_DB",
+    "provider-registry-db",
+  ]);
+});
+
+test("d1Migrations rejects malformed and duplicated names", () => {
+  // The names are interpolated into a wrangler command line, so the character
+  // set is what keeps a policy entry from smuggling flags into the command.
+  for (const [name, pattern] of [
+    ["-leading-hyphen", /must be a D1 binding or database name/],
+    ["has space", /must be a D1 binding or database name/],
+    ["db;drop", /must be a D1 binding or database name/],
+    ["--remote", /must be a D1 binding or database name/],
+    ["", /d1Migrations entry/],
+  ]) {
+    const policy = deploymentPolicy();
+    policy.d1Migrations = [name];
+    assert.throws(() => validateDeploymentPolicy(policy), pattern);
+  }
+
+  const duplicated = deploymentPolicy();
+  duplicated.d1Migrations = ["DEVTOOL_DB", "DEVTOOL_DB"];
+  assert.throws(
+    () => validateDeploymentPolicy(duplicated),
+    /lists DEVTOOL_DB twice/,
+  );
+
+  const notArray = deploymentPolicy();
+  notArray.d1Migrations = "DEVTOOL_DB";
+  assert.throws(
+    () => validateDeploymentPolicy(notArray),
+    /d1Migrations must be an array/,
+  );
 });
 
 test("workerSecrets cannot forward the deployment credential", () => {
@@ -471,6 +516,7 @@ test("npm requires distinct candidate and latest release tags", () => {
   assert.deepEqual(validateNpmPolicy(npmPolicy()), {
     ...npmPolicy(),
     versionStrategy: "patch",
+    releasePrefix: "",
   });
   const sameTag = npmPolicy();
   sameTag.candidateDistTag = "latest";
@@ -495,6 +541,21 @@ test("npm versionStrategy defaults to patch and rejects unknown values", () => {
     assert.throws(
       () => validateNpmPolicy(policy),
       /versionStrategy must be patch or conventional/,
+    );
+  }
+});
+
+test("npm accepts a release prefix for repositories with other flows", () => {
+  const policy = npmPolicy();
+  policy.releasePrefix = "types";
+  assert.equal(validateNpmPolicy(policy).releasePrefix, "types");
+
+  for (const invalid of ["Types", "types_pkg", "-types"]) {
+    const malformed = npmPolicy();
+    malformed.releasePrefix = invalid;
+    assert.throws(
+      () => validateNpmPolicy(malformed),
+      /releasePrefix must be empty or a lowercase letters-and-numbers slug/,
     );
   }
 });
