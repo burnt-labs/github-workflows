@@ -486,15 +486,21 @@ test("no workflow accepts an npm token", () => {
   // npm is retiring 2FA-bypass granular access tokens: they stop skipping 2FA
   // for account operations in August 2026 and lose publishing entirely around
   // January 2027. Publishing here is OIDC trusted publishing and nothing else,
-  // so the only mention of a token name allowed anywhere is npm-publish.yml
-  // refusing to run when one is present.
+  // so a token name may appear only where a guard refuses to run when one is
+  // present: the emptiness check, the refusal message, the grep pattern that
+  // exempts setup-node's literal interpolation placeholder, and comments
+  // explaining those.
   for (const name of fs.readdirSync(directory)) {
     if (!name.endsWith(".yml")) continue;
     const source = fs.readFileSync(`${directory}/${name}`, "utf8");
     for (const [line] of source.matchAll(
       /^.*(NPM_TOKEN|NODE_AUTH_TOKEN).*$/gm,
     )) {
-      assert.match(line, /-n "\$\{|must not carry one/, `${name}: ${line}`);
+      assert.match(
+        line,
+        /-n "\$\{|must not carry one|^\s*#|NODE_AUTH_TOKEN\\\}/,
+        `${name}: ${line}`,
+      );
     }
   }
 });
@@ -757,5 +763,98 @@ test("npm publish runs package-scoped steps in the package directory", () => {
       /npm-policy\)\.workingDirectory/,
       name,
     );
+  }
+});
+
+test("npm changesets flow publishes with OIDC and API commits only", () => {
+  const source = fs.readFileSync(`${directory}/npm-changesets.yml`, "utf8");
+  const workflow = parse(source);
+  const release = workflow.jobs.release;
+  assert.equal(release.permissions["id-token"], "write");
+  const checkout = release.steps[0];
+  assert.equal(checkout.with["fetch-depth"], 0);
+  assert.equal(checkout.with["persist-credentials"], false);
+  const publish = release.steps.at(-1);
+  assert.equal(publish.with.commitMode, "github-api");
+  // Provenance follows source visibility; the registry refuses it from
+  // private repositories rather than degrading.
+  assert.match(
+    publish.env.NPM_CONFIG_PROVENANCE,
+    /repository\.private == false/,
+  );
+  assert.match(source, /ACTIONS_ID_TOKEN_REQUEST_URL/);
+});
+
+test("npm changesets guard rejects real credentials, allows the placeholder", (t) => {
+  const workflow = parse(
+    fs.readFileSync(`${directory}/npm-changesets.yml`, "utf8"),
+  );
+  const guard = workflow.jobs.release.steps.find(
+    (step) => step.name === "Verify trusted-publishing credentials",
+  );
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "npmrc-guard-"));
+  t.after(() => fs.rmSync(root, { recursive: true }));
+  const cases = [
+    // [description, npmrc content or null, NODE_AUTH_TOKEN, OIDC url, status]
+    ["no oidc", null, "", "", 1],
+    ["env token", null, "npm_x", "https://oidc", 1],
+    ["no npmrc", null, "", "https://oidc", 0],
+    [
+      "placeholder",
+      "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}\n",
+      "",
+      "https://oidc",
+      0,
+    ],
+    [
+      "empty value",
+      "//registry.npmjs.org/:_authToken=\n",
+      "",
+      "https://oidc",
+      0,
+    ],
+    [
+      "literal credential",
+      "//registry.npmjs.org/:_authToken=npm_realtoken\n",
+      "",
+      "https://oidc",
+      1,
+    ],
+    // npm's ini parser trims whitespace around `=`, so this authenticates —
+    // the guard has to see through the spacing (caught in review of the
+    // original guard).
+    [
+      "literal credential with spaces",
+      "//registry.npmjs.org/:_authToken = npm_realtoken\n",
+      "",
+      "https://oidc",
+      1,
+    ],
+    [
+      "placeholder with spaces",
+      "//registry.npmjs.org/:_authToken =${NODE_AUTH_TOKEN}\n",
+      "",
+      "https://oidc",
+      0,
+    ],
+  ];
+  for (const [
+    index,
+    [label, npmrc, token, oidc, expected],
+  ] of cases.entries()) {
+    const env = { ...process.env, ACTIONS_ID_TOKEN_REQUEST_URL: oidc };
+    delete env.NODE_AUTH_TOKEN;
+    if (token) env.NODE_AUTH_TOKEN = token;
+    if (npmrc === null) {
+      env.NPM_CONFIG_USERCONFIG = path.join(root, `absent-${index}`);
+    } else {
+      const file = path.join(root, `npmrc-${index}`);
+      fs.writeFileSync(file, npmrc);
+      env.NPM_CONFIG_USERCONFIG = file;
+    }
+    const result = spawnSync("bash", ["-euo", "pipefail", "-c", guard.run], {
+      env,
+    });
+    assert.equal(result.status, expected, `${label}: ${result.stderr}`);
   }
 });

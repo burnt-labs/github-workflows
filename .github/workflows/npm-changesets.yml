@@ -1,0 +1,173 @@
+# The Changesets-shaped npm flow, for repositories that publish MULTIPLE
+# interdependent packages from one workspace.
+#
+# The tag-derived flow (npm-main.yml / npm-release.yml) owns the single-package
+# case and cannot be stretched to this one: it reads the bump from all commits
+# since the last release, with no way to attribute a commit to a package, so
+# with two packages every change stream bumps both. Changesets scopes each
+# change to the packages it names and cascades bumps through dependents —
+# that is the one thing it does that cannot be recreated with tags, and the
+# reason both flows exist. One published package: use the tag flow. Two or
+# more interdependent ones: use this.
+#
+# Versioning is Changesets' own: merges accumulate changeset files, the flow
+# maintains a version pull request, and merging that pull request is the
+# release act — this same flow then publishes the new versions to npm. The
+# publish authenticates with GitHub OIDC trusted publishing; there is no
+# token anywhere, and a guard fails the run if one appears. Provenance is
+# requested only when the source repository is public, because the registry
+# refuses it from private repositories (E422) rather than degrading.
+#
+# What a caller provides:
+# - permissions: contents: write, pull-requests: write (the version pull
+#   request), id-token: write (trusted publishing)
+# - concurrency with cancel-in-progress: false — publishing then tagging must
+#   not be cancelled between the two
+# - the trusted publisher on npmjs.com for EVERY published package pointing
+#   at the CALLER's workflow file; OIDC identifies the top-level workflow,
+#   and npm allows one workflow per package, so all publishes must run from
+#   that one file
+# - version-command / publish-command when its scripts differ from the
+#   defaults; both run from the repository root
+
+name: Burnt npm Changesets
+
+on:
+  workflow_call:
+    inputs:
+      quality-policy-path:
+        description: Repository-relative quality policy JSONC path
+        required: false
+        default: .github/quality-policy.jsonc
+        type: string
+      version-command:
+        description: Command Changesets runs to apply pending changesets
+        required: false
+        default: npm run version:packages
+        type: string
+      publish-command:
+        description: Command Changesets runs to publish the packages
+        required: false
+        default: npm run publish:packages
+        type: string
+      pr-title:
+        description: Title of the version pull request
+        required: false
+        default: "chore(release): version packages 🦋"
+        type: string
+      pr-commit:
+        description: Commit message of the version pull request
+        required: false
+        default: "chore: update versions"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@d169eff38ec93b6405f15a2b2dd86b4bcda21bcb # v1.4.0
+    with:
+      quality-policy-path: ${{ inputs.quality-policy-path }}
+
+  release:
+    name: Version or publish
+    needs: quality
+    runs-on: ubicloud-standard-4
+    permissions:
+      # The version pull request, and the tags and releases Changesets
+      # creates after publishing.
+      contents: write
+      pull-requests: write
+      # npm trusted publishing (OIDC).
+      id-token: write
+    defaults:
+      run:
+        working-directory: ${{ fromJSON(needs.quality.outputs.quality-policy).workingDirectory }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Changesets reads history and tags to decide what is unpublished.
+          fetch-depth: 0
+          # Do not leave the job's token in `.git/config`. The install and
+          # build run package code before anything publishes, so a persisted
+          # credential is reachable by the dependency tree. `commitMode:
+          # github-api` below authenticates through GITHUB_TOKEN instead, and
+          # API commits are signed by GitHub, which branch protection tends
+          # to want.
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: lts/*
+          registry-url: https://registry.npmjs.org
+      - run: corepack enable
+      - name: Pin the npm CLI
+        # See "npm install-time security" in AGENTS.md. npm 12 is the floor
+        # for both halves of this flow: it enforces the install-time
+        # defaults, and it is well past the 11.5.1 that trusted publishing
+        # needs — Changesets shells out to `npm publish`, whichever package
+        # manager installed the workspace.
+        run: |
+          npm install --global npm@12
+          if [ "$(npm --version | cut -d. -f1)" != "12" ]; then
+            echo "::error::Expected npm 12 on PATH, found $(npm --version). Something is shadowing the pinned CLI."
+            exit 1
+          fi
+      - name: Install
+        run: ${{ fromJSON(needs.quality.outputs.quality-policy).commands.install }}
+      # Build before publishing rather than leaning on per-package
+      # `prepublishOnly`, so a broken build fails the job with its own error
+      # instead of surfacing as a publish failure halfway through a
+      # multi-package publish.
+      - name: Build
+        run: ${{ fromJSON(needs.quality.outputs.quality-policy).commands.build }}
+      # This checks what npm will actually authenticate with, NOT whether a
+      # token exists somewhere in scope — reading org-level secrets into the
+      # environment to assert they are empty reports the organization's
+      # configuration, not this job's, and fails repositories that never
+      # handed npm anything. What decides the outcome is NODE_AUTH_TOKEN,
+      # which setup-node's generated npmrc interpolates at read time; this
+      # flow never sets it, so npm falls through to OIDC.
+      - name: Verify trusted-publishing credentials
+        run: |
+          if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+            echo "::error::No OIDC token available. The calling workflow must grant id-token: write."
+            exit 1
+          fi
+          if [ -n "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "::error::An npm token is present. This flow publishes with trusted publishing and must not carry one."
+            exit 1
+          fi
+          # setup-node writes an `_authToken` line holding the LITERAL text
+          # of the interpolation placeholder — the action does not expand it,
+          # npm does, at read time (actions/setup-node, src/authutil.ts). So
+          # the placeholder is expected content and must not be read as a
+          # credential; what this rejects is `_authToken` set to anything
+          # else, a hardcoded token committed or injected into the file. npm
+          # parses ini-style and trims whitespace around `=`, so the patterns
+          # allow it too — `_authToken = <token>` authenticates just as well.
+          npmrc="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
+          if [ -f "$npmrc" ] &&
+             grep -E '_authToken[[:space:]]*=' "$npmrc" |
+             grep -qvE '_authToken[[:space:]]*=[[:space:]]*(\$\{NODE_AUTH_TOKEN\})?[[:space:]]*$'; then
+            echo "::error::$npmrc sets _authToken to a literal credential. This flow publishes with trusted publishing and must not carry one."
+            exit 1
+          fi
+      - name: Create release pull request or publish to npm
+        uses: changesets/action@a45c4d594aa4e2c509dc14a9f2b3b67ba3780d0d # v1.9.0
+        with:
+          title: ${{ inputs.pr-title }}
+          commit: ${{ inputs.pr-commit }}
+          version: ${{ inputs.version-command }}
+          publish: ${{ inputs.publish-command }}
+          # Commit and tag over the API rather than the git CLI, which has no
+          # credentials now that checkout does not persist them.
+          commitMode: github-api
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The registry refuses provenance from private source repositories
+          # (E422) rather than publishing without the attestation, so the
+          # flag follows visibility: a private repository publishes through
+          # the same OIDC path without attesting, and starts attesting the
+          # moment it goes public, with no workflow change.
+          NPM_CONFIG_PROVENANCE: ${{ github.event.repository.private == false }}

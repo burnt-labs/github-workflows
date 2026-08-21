@@ -171,6 +171,12 @@ Workflows in this repository never create commits or push branches.
 
 ## npm
 
+Repositories publishing multiple interdependent packages use
+`npm-changesets.yml`, which wraps Changesets — version pull request on merge,
+publish when it lands — in the same trusted-publishing posture as the rest of
+the family. The tag-derived flows below are for repositories publishing one
+package.
+
 The npm workflow family performs a package dry run on pull requests, publishes
 `v<version>-rc.<run>` with the `next` dist-tag from main, and publishes the
 stable version with `latest` after manual or automatic promotion. Publishing

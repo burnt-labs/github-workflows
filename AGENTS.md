@@ -32,7 +32,7 @@ These are not preferences. Changes that break them will be rejected.
 
 ## The flows
 
-Ten workflows. Eight are entry points; two are internal.
+Eleven workflows. Nine are entry points; two are internal.
 
 | Workflow                 | Called by                   | Purpose                                        |
 | ------------------------ | --------------------------- | ---------------------------------------------- |
@@ -43,6 +43,7 @@ Ten workflows. Eight are entry points; two are internal.
 | `npm-pr.yml`             | consumer, on `pull_request` | Quality, package dry run                       |
 | `npm-main.yml`           | consumer, on push to main   | Publish the candidate dist-tag, release drafts |
 | `npm-release.yml`        | consumer, on `release`      | Publish the release dist-tag                   |
+| `npm-changesets.yml`     | consumer, on push to main   | Changesets version PR, multi-package publish   |
 | `phala-deploy.yml`       | consumer                    | Build and deploy a Phala CVM target            |
 | `cloudflare-version.yml` | internal                    | One `wrangler versions upload` or `deploy`     |
 | `npm-publish.yml`        | internal                    | One `npm publish` via OIDC trusted publishing  |
@@ -197,6 +198,26 @@ is rejected rather than defaulted, because a release preview would upload the
 same build to the same Worker twice. Note that this puts pull-request previews
 on that GitHub Environment, inheriting its secrets and protection rules; that
 is the cost of modelling one environment honestly.
+
+### Two npm flow shapes
+
+The npm flows come in two shapes, chosen by how many packages a repository
+publishes:
+
+- **One package** — `npm-main.yml` / `npm-release.yml`. Versions derive from
+  release tags and Conventional Commits; nothing is committed back. The caller
+  carries both triggers in one file with event routing, because npm allows one
+  trusted-publisher workflow per package and both the candidate and the
+  promoted publish must run from it.
+- **Multiple interdependent packages** — `npm-changesets.yml`. The tag flow
+  cannot attribute a commit to a package, so with two packages every change
+  stream would bump both; Changesets scopes each change to the packages it
+  names and cascades bumps through dependents. The caller is a single
+  push-to-main trigger with no routing: merging the version pull request is
+  the release act, and the same run publishes.
+
+Both shapes share the publishing posture below — OIDC trusted publishing, no
+tokens, provenance only from public repositories.
 
 ### npm-policy.jsonc
 
