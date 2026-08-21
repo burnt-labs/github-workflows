@@ -486,15 +486,21 @@ test("no workflow accepts an npm token", () => {
   // npm is retiring 2FA-bypass granular access tokens: they stop skipping 2FA
   // for account operations in August 2026 and lose publishing entirely around
   // January 2027. Publishing here is OIDC trusted publishing and nothing else,
-  // so the only mention of a token name allowed anywhere is npm-publish.yml
-  // refusing to run when one is present.
+  // so a token name may appear only where a guard refuses to run when one is
+  // present: the emptiness check, the refusal message, the grep pattern that
+  // exempts setup-node's literal interpolation placeholder, and comments
+  // explaining those.
   for (const name of fs.readdirSync(directory)) {
     if (!name.endsWith(".yml")) continue;
     const source = fs.readFileSync(`${directory}/${name}`, "utf8");
     for (const [line] of source.matchAll(
       /^.*(NPM_TOKEN|NODE_AUTH_TOKEN).*$/gm,
     )) {
-      assert.match(line, /-n "\$\{|must not carry one/, `${name}: ${line}`);
+      assert.match(
+        line,
+        /-n "\$\{|must not carry one|^\s*#|NODE_AUTH_TOKEN\\\}/,
+        `${name}: ${line}`,
+      );
     }
   }
 });
@@ -757,5 +763,176 @@ test("npm publish runs package-scoped steps in the package directory", () => {
       /npm-policy\)\.workingDirectory/,
       name,
     );
+  }
+});
+
+test("npm changesets flow publishes with OIDC and API commits only", () => {
+  const source = fs.readFileSync(`${directory}/npm-changesets.yml`, "utf8");
+  const workflow = parse(source);
+  const release = workflow.jobs.release;
+  assert.equal(release.permissions["id-token"], "write");
+  // Serialization is enforced here, not trusted to the caller: concurrent
+  // runs force-update the changeset-release branch, and a cancel between
+  // publish and tagging leaves registry versions with nothing behind them.
+  assert.match(release.concurrency.group, /github\.repository/);
+  assert.equal(release.concurrency["cancel-in-progress"], false);
+  const checkout = release.steps.find((step) =>
+    step.uses?.startsWith("actions/checkout@"),
+  );
+  assert.equal(checkout.with["fetch-depth"], 0);
+  assert.equal(checkout.with["persist-credentials"], false);
+  // The guard runs before any npm invocation at all — the global pin
+  // downloads npm through the generated user config — and so before any
+  // consumer code has a rejected credential in scope.
+  const stepNames = release.steps.map((step) => step.name);
+  assert.ok(
+    stepNames.indexOf("Verify trusted-publishing credentials") <
+      stepNames.indexOf("Pin the npm CLI"),
+  );
+  assert.ok(
+    stepNames.indexOf("Pin the npm CLI") < stepNames.indexOf("Install"),
+  );
+  // The action resolves the workspace at the repository root; a nested
+  // quality workingDirectory is rejected rather than accommodated.
+  const validate = release.steps.find(
+    (step) => step.name === "Validate invocation",
+  );
+  assert.match(validate.if, /workingDirectory != '\.'/);
+  assert.match(validate.run, /repository root/);
+  const publish = release.steps.at(-1);
+  assert.equal(publish.with.commitMode, "github-api");
+  // A stale run — one whose branch has already moved on — must stand down
+  // rather than force-update the version pull request backwards.
+  assert.equal(publish.if, "steps.freshness.outputs.stale == 'false'");
+  assert.ok(release.steps.find((step) => step.id === "freshness"));
+  // Provenance follows source visibility; the registry refuses it from
+  // private repositories rather than degrading.
+  assert.match(
+    publish.env.NPM_CONFIG_PROVENANCE,
+    /repository\.private == false/,
+  );
+  assert.match(source, /ACTIONS_ID_TOKEN_REQUEST_URL/);
+});
+
+test("npm changesets guard rejects real credentials, allows the placeholder", (t) => {
+  const workflow = parse(
+    fs.readFileSync(`${directory}/npm-changesets.yml`, "utf8"),
+  );
+  const guard = workflow.jobs.release.steps.find(
+    (step) => step.name === "Verify trusted-publishing credentials",
+  );
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "npmrc-guard-"));
+  t.after(() => fs.rmSync(root, { recursive: true }));
+  const cases = [
+    // [label, user npmrc, project npmrc, env overrides, expected status]
+    ["no oidc", null, null, { ACTIONS_ID_TOKEN_REQUEST_URL: "" }, 1],
+    ["env NODE_AUTH_TOKEN", null, null, { NODE_AUTH_TOKEN: "npm_x" }, 1],
+    ["env NPM_TOKEN", null, null, { NPM_TOKEN: "npm_x" }, 1],
+    ["no npmrc anywhere", null, null, {}, 0],
+    [
+      "placeholder",
+      "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}\n",
+      null,
+      {},
+      0,
+    ],
+    ["empty value", "//registry.npmjs.org/:_authToken=\n", null, {}, 0],
+    [
+      "literal credential",
+      "//registry.npmjs.org/:_authToken=npm_realtoken\n",
+      null,
+      {},
+      1,
+    ],
+    // npm's ini parser trims whitespace around `=`, so this authenticates —
+    // the guard has to see through the spacing (caught in review of the
+    // guard's first incarnation).
+    [
+      "literal credential with spaces",
+      "//registry.npmjs.org/:_authToken = npm_realtoken\n",
+      null,
+      {},
+      1,
+    ],
+    [
+      "placeholder with spaces",
+      "//registry.npmjs.org/:_authToken =${NODE_AUTH_TOKEN}\n",
+      null,
+      {},
+      0,
+    ],
+    // The other credential keys npm accepts authenticate a registry just as
+    // _authToken does, and a project .npmrc is read by npm like the user one.
+    ["basic auth", "//registry.npmjs.org/:_auth=dXNlcjpwYXNz\n", null, {}, 1],
+    ["password", "//registry.npmjs.org/:_password=cGFzcw==\n", null, {}, 1],
+    [
+      "token helper",
+      "//registry.npmjs.org/:tokenHelper=/usr/local/bin/npm-token\n",
+      null,
+      {},
+      1,
+    ],
+    [
+      "client certificate",
+      "//registry.npmjs.org/:certfile=/etc/ssl/npm.crt\n//registry.npmjs.org/:keyfile=/etc/ssl/npm.key\n",
+      null,
+      {},
+      1,
+    ],
+    [
+      "project npmrc credential",
+      null,
+      "//registry.npmjs.org/:_authToken=npm_realtoken\n",
+      {},
+      1,
+    ],
+    ["project npmrc benign", null, "save-exact=true\n", {}, 0],
+    // The action runs version/publish from the repository root, which can
+    // differ from this step's working directory under a non-root quality
+    // policy — the workspace root .npmrc must be scanned from anywhere.
+    [
+      "workspace root credential from elsewhere",
+      null,
+      "workspace://registry.npmjs.org/:_authToken=npm_realtoken\n",
+      {},
+      1,
+    ],
+  ];
+  for (const [
+    index,
+    [label, userRc, projectRc, extra, expected],
+  ] of cases.entries()) {
+    const cwd = fs.mkdtempSync(path.join(root, `cwd-${index}-`));
+    const env = {
+      ...process.env,
+      ACTIONS_ID_TOKEN_REQUEST_URL: "https://oidc",
+      NPM_CONFIG_USERCONFIG: path.join(cwd, "absent-user-npmrc"),
+      ...extra,
+    };
+    delete env.NODE_AUTH_TOKEN;
+    delete env.NPM_TOKEN;
+    Object.assign(env, extra);
+    if (userRc !== null) {
+      const file = path.join(cwd, "user-npmrc");
+      fs.writeFileSync(file, userRc);
+      env.NPM_CONFIG_USERCONFIG = file;
+    }
+    const workspace = fs.mkdtempSync(path.join(root, `ws-${index}-`));
+    env.GITHUB_WORKSPACE = workspace;
+    if (projectRc !== null) {
+      if (projectRc.startsWith("workspace:")) {
+        fs.writeFileSync(
+          path.join(workspace, ".npmrc"),
+          projectRc.slice("workspace:".length),
+        );
+      } else {
+        fs.writeFileSync(path.join(cwd, ".npmrc"), projectRc);
+      }
+    }
+    const result = spawnSync("bash", ["-euo", "pipefail", "-c", guard.run], {
+      cwd,
+      env,
+    });
+    assert.equal(result.status, expected, `${label}: ${result.stderr}`);
   }
 });

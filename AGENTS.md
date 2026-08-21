@@ -4,13 +4,63 @@ This repository holds the organization's required quality workflow and the
 reusable deployment and publishing workflows. Consumer repositories contribute
 policy files and thin trigger workflows; everything else lives here.
 
+## The shape
+
+Two layers, hard boundary between them.
+
+**This repository is the platform layer.** It owns all logic, all
+conditionals, and all credential handling. Nothing outside it touches a
+secret, an OIDC token, or a publish/deploy decision. It is operated with
+batched releases, Dependabot advancing consumer pins, and a capped policy
+schema.
+
+**A consumer repository is a declaration layer.** Its `.github` contains
+exactly two kinds of things, and no logic in either:
+
+- **Policy files** — every repository-specific fact, commented JSONC,
+  schema-validated here. Configuration goes in policy, never inline in a
+  workflow.
+- **Trigger files** — thin callers of roughly ten lines with no `if:`
+  conditions. Each file exists only because GitHub attaches something
+  per-file that the flows need separated: trigger filters, a permissions
+  grant, a required-check identity, or a concurrency namespace. A file that
+  does not carry one of those should not exist; a single multiplexed "ci.yml"
+  is rejected because it must union every path's permissions onto every
+  event and replaces declarative `on:` filters with runs that no-op.
+  Repo-shaped odd jobs (a contract conformance check, a monitor) stay in the
+  consumer repository — they are not platform material.
+
+Routing rules, applied in order:
+
+1. A repository publishing **one** npm package uses the tag-derived flow
+   (`npm-main.yml` / `npm-release.yml`). **Two or more** interdependent
+   packages use `npm-changesets.yml`. See "Two npm flow shapes" below for
+   why the line is hard.
+2. The npm caller's filename is load-bearing: npmjs.com binds each package's
+   trusted publisher to one workflow file, so every publish must run from
+   that file. Under the tag flow that forces one file with two triggers; the
+   Changesets flow needs only a push trigger.
+3. A repository the standard cannot serve yet runs **sanctioned bespoke**
+   workflows: an in-repo flow whose header documents exactly which gaps keep
+   it off the standard, revisited when the standard grows. Silent divergence
+   is the failure mode; the gap list is what distinguishes an outlier from
+   drift.
+4. The policy schema grows only for needs two or more repositories share.
+   A knob wanted by exactly one repository means that repository stays
+   bespoke for that piece instead.
+
 ## Invariants
 
 These are not preferences. Changes that break them will be rejected.
 
 - Keep every commit signed.
-- Workflows must never create commits or push branches. Version numbers are
-  derived from release tags, never written back to the repository.
+- Workflows must never run `git commit` or `git push`, and the tag-derived
+  flows never write versions back to a repository. The one authorized
+  exception to write-back: `npm-changesets.yml` maintains its version pull
+  request and release tags through the GitHub API (`commitMode: github-api`)
+  — that write-back is Changesets' entire contract and the reason the flow
+  exists, and API commits are signed by GitHub, which branch protection
+  wants. Nothing may extend this exception to the git CLI.
 - Reusable deployment jobs must use the caller repository's actual target
   environment. Do not introduce `preview` or `preview-*` environments.
 - Candidate and release are semantic roles, mapped by repository policy.
@@ -32,7 +82,7 @@ These are not preferences. Changes that break them will be rejected.
 
 ## The flows
 
-Ten workflows. Eight are entry points; two are internal.
+Eleven workflows. Nine are entry points; two are internal.
 
 | Workflow                 | Called by                   | Purpose                                        |
 | ------------------------ | --------------------------- | ---------------------------------------------- |
@@ -43,6 +93,7 @@ Ten workflows. Eight are entry points; two are internal.
 | `npm-pr.yml`             | consumer, on `pull_request` | Quality, package dry run                       |
 | `npm-main.yml`           | consumer, on push to main   | Publish the candidate dist-tag, release drafts |
 | `npm-release.yml`        | consumer, on `release`      | Publish the release dist-tag                   |
+| `npm-changesets.yml`     | consumer, on push to main   | Changesets version PR, multi-package publish   |
 | `phala-deploy.yml`       | consumer                    | Build and deploy a Phala CVM target            |
 | `cloudflare-version.yml` | internal                    | One `wrangler versions upload` or `deploy`     |
 | `npm-publish.yml`        | internal                    | One `npm publish` via OIDC trusted publishing  |
@@ -197,6 +248,26 @@ is rejected rather than defaulted, because a release preview would upload the
 same build to the same Worker twice. Note that this puts pull-request previews
 on that GitHub Environment, inheriting its secrets and protection rules; that
 is the cost of modelling one environment honestly.
+
+### Two npm flow shapes
+
+The npm flows come in two shapes, chosen by how many packages a repository
+publishes:
+
+- **One package** — `npm-main.yml` / `npm-release.yml`. Versions derive from
+  release tags and Conventional Commits; nothing is committed back. The caller
+  carries both triggers in one file with event routing, because npm allows one
+  trusted-publisher workflow per package and both the candidate and the
+  promoted publish must run from it.
+- **Multiple interdependent packages** — `npm-changesets.yml`. The tag flow
+  cannot attribute a commit to a package, so with two packages every change
+  stream would bump both; Changesets scopes each change to the packages it
+  names and cascades bumps through dependents. The caller is a single
+  push-to-main trigger with no routing: merging the version pull request is
+  the release act, and the same run publishes.
+
+Both shapes share the publishing posture below — OIDC trusted publishing, no
+tokens, provenance only from public repositories.
 
 ### npm-policy.jsonc
 

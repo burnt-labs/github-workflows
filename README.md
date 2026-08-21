@@ -167,11 +167,20 @@ SHA with a trailing version comment, so a compromised upstream tag cannot reach
 the jobs that hold deployment credentials. Dependabot advances the pins weekly
 and a test rejects any reference that is not a 40-character SHA.
 
-Workflows in this repository never create commits or push branches.
+Workflows in this repository never run `git commit` or `git push`, and the
+tag-derived flows never write versions back to a repository. The one
+write-back exception is the Changesets flow's version pull request,
+maintained through the GitHub API — see the invariant in AGENTS.md.
 
 ## npm
 
-The npm workflow family performs a package dry run on pull requests, publishes
+Repositories publishing multiple interdependent packages use
+`npm-changesets.yml`, which wraps Changesets — version pull request on merge,
+publish when it lands — in the same trusted-publishing posture as the rest of
+the family. The tag-derived flows below are for repositories publishing one
+package.
+
+The tag-derived pair performs a package dry run on pull requests, publishes
 `v<version>-rc.<run>` with the `next` dist-tag from main, and publishes the
 stable version with `latest` after manual or automatic promotion. Publishing
 uses npm trusted publishing through GitHub OIDC, with provenance when the
