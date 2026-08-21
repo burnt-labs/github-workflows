@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   quality:
-    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@324f7b024872e92e1d979ebe254d908fc024eacc # v1.3.4
+    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@46ae18b0f5ff1735e07601e41a6044b358379853 # v1.4.0
 
   metadata:
     needs: quality
@@ -31,7 +31,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: burnt-labs/github-workflows
-          ref: 7f99fe9d05d092be22ecabc7a83dc206df7a9d0d # v1.3.0
+          ref: 46ae18b0f5ff1735e07601e41a6044b358379853 # v1.4.0
           path: .burnt-workflows
       - name: Read stable release tags
         env:
@@ -42,19 +42,32 @@ jobs:
             > "$RUNNER_TEMP/release-tags.txt"
       - name: Read commits since the last release
         env:
+          RELEASE_PREFIX: ${{ fromJSON(needs.quality.outputs.npm-policy).releasePrefix }}
           VERSION_STRATEGY: ${{ fromJSON(needs.quality.outputs.npm-policy).versionStrategy }}
         run: |
           : > "$RUNNER_TEMP/commit-messages.txt"
           if [ "$VERSION_STRATEGY" != "conventional" ]; then
             exit 0
           fi
-          # The newest stable tag that exists in this clone. A tag named by a
-          # release but never pushed as a git ref would otherwise make `git log`
-          # fail; fall back to the whole history, which is correct for a first
-          # release and merely verbose afterwards.
+          # The newest stable tag IN THIS FLOW'S NAMESPACE that exists in this
+          # clone. Filtering by prefix matters in a repository with more than
+          # one release flow: without it, the newest stable release is whatever
+          # another flow cut last — a Worker deploy, say — and the commit range
+          # read here would start there instead of at the package's own last
+          # release. A tag named by a release but never pushed as a git ref
+          # would otherwise make `git log` fail; fall back to the whole
+          # history, which is correct for a first release and merely verbose
+          # afterwards.
+          tag_prefix=""
+          if [ -n "$RELEASE_PREFIX" ]; then tag_prefix="${RELEASE_PREFIX}-"; fi
           last=""
           while read -r tag; do
             [ -n "$tag" ] || continue
+            # The prefix is a validated lowercase slug, so interpolating it
+            # into the pattern cannot change the pattern's shape.
+            if [[ ! "$tag" =~ ^${tag_prefix}v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              continue
+            fi
             if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
               last="$tag"
               break
@@ -68,6 +81,7 @@ jobs:
       - id: metadata
         env:
           GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          RELEASE_PREFIX: ${{ fromJSON(needs.quality.outputs.npm-policy).releasePrefix }}
           VERSION_FILE: ${{ fromJSON(needs.quality.outputs.npm-policy).versionFile }}
           VERSION_STRATEGY: ${{ fromJSON(needs.quality.outputs.npm-policy).versionStrategy }}
           COMMIT_MESSAGES_FILE: ${{ runner.temp }}/commit-messages.txt
@@ -75,19 +89,25 @@ jobs:
           RELEASE_TAGS="$(cat "$RUNNER_TEMP/release-tags.txt")" \
             node "$GITHUB_WORKSPACE/.burnt-workflows/scripts/release-metadata.mjs"
       - id: versions
+        # The tag carries the namespace; the npm version must not. Stripping
+        # only `v` would hand npm `types-v1.2.3-rc.4` as a version, which it
+        # rejects — so the configured prefix comes off with it.
         env:
           CANDIDATE_TAG: ${{ steps.metadata.outputs.candidate-tag }}
           RELEASE_TAG: ${{ steps.metadata.outputs.release-tag }}
+          RELEASE_PREFIX: ${{ fromJSON(needs.quality.outputs.npm-policy).releasePrefix }}
         run: |
-          echo "candidate-version=${CANDIDATE_TAG#v}" >> "$GITHUB_OUTPUT"
-          echo "release-version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
+          tag_prefix=""
+          if [ -n "$RELEASE_PREFIX" ]; then tag_prefix="${RELEASE_PREFIX}-"; fi
+          echo "candidate-version=${CANDIDATE_TAG#"$tag_prefix"v}" >> "$GITHUB_OUTPUT"
+          echo "release-version=${RELEASE_TAG#"$tag_prefix"v}" >> "$GITHUB_OUTPUT"
 
   publish-candidate:
     needs: [quality, metadata]
     permissions:
       contents: read
       id-token: write
-    uses: burnt-labs/github-workflows/.github/workflows/npm-publish.yml@324f7b024872e92e1d979ebe254d908fc024eacc # v1.3.4
+    uses: burnt-labs/github-workflows/.github/workflows/npm-publish.yml@46ae18b0f5ff1735e07601e41a6044b358379853 # v1.4.0
     with:
       quality-policy: ${{ needs.quality.outputs.quality-policy }}
       npm-policy: ${{ needs.quality.outputs.npm-policy }}
@@ -151,7 +171,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: burnt-labs/github-workflows/.github/workflows/npm-publish.yml@324f7b024872e92e1d979ebe254d908fc024eacc # v1.3.4
+    uses: burnt-labs/github-workflows/.github/workflows/npm-publish.yml@46ae18b0f5ff1735e07601e41a6044b358379853 # v1.4.0
     with:
       quality-policy: ${{ needs.quality.outputs.quality-policy }}
       npm-policy: ${{ needs.quality.outputs.npm-policy }}

@@ -70,7 +70,17 @@ jobs:
           fi
       - name: Install
         run: ${{ fromJSON(inputs.quality-policy).commands.install }}
+      # The package-scoped steps below override the job default (the quality
+      # policy's workingDirectory) with the npm policy's, the same directory
+      # npm-pr.yml and npm-main.yml already run in. The two differ in a
+      # workspace repository — quality commands run at the root, where the
+      # lockfile lives, while the publishable package sits in a subdirectory —
+      # and `npm publish` from the root would pack the root package instead.
+      # A package that needs compiling before it packs declares that itself,
+      # in `prepublishOnly`, which `npm publish` runs from the package
+      # directory with the root install already in place.
       - name: Set publish version without committing
+        working-directory: ${{ fromJSON(inputs.npm-policy).workingDirectory }}
         env:
           VERSION: ${{ inputs.version }}
           VERSION_FILE: ${{ fromJSON(inputs.npm-policy).versionFile }}
@@ -86,6 +96,7 @@ jobs:
         run: ${{ fromJSON(inputs.quality-policy).commands.build }}
       - name: Read package name
         id: package
+        working-directory: ${{ fromJSON(inputs.npm-policy).workingDirectory }}
         env:
           VERSION_FILE: ${{ fromJSON(inputs.npm-policy).versionFile }}
         run: echo "name=$(node -p "require('./' + process.env.VERSION_FILE).name")" >> "$GITHUB_OUTPUT"
@@ -100,13 +111,26 @@ jobs:
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
-      - name: Publish with provenance
+      - name: Publish with provenance when the source is public
         if: steps.existing.outputs.exists == 'false'
+        working-directory: ${{ fromJSON(inputs.npm-policy).workingDirectory }}
+        # The registry only accepts provenance from public source repositories
+        # — a private repository's publish is refused outright with E422, not
+        # published without the attestation. Provenance is therefore gated on
+        # visibility rather than requested unconditionally: a private
+        # repository publishes via the same OIDC trusted publishing, just
+        # without the attestation, and starts attesting the moment it goes
+        # public with no workflow change.
+        #
+        # The fragment keeps `--provenance` on the && side and '' on the ||
+        # side. The idiom returns the last evaluated operand and '' is falsy,
+        # so the reversed form — condition && '' || flag — would emit the flag
+        # every time (see the same trap documented in cloudflare-version.yml).
         run: >-
           npm publish
           --access ${{ fromJSON(inputs.npm-policy).access }}
           --tag ${{ inputs.dist-tag }}
-          --provenance
+          ${{ github.event.repository.private == false && '--provenance' || '' }}
       - name: Report package
         run: |
           {
@@ -114,4 +138,5 @@ jobs:
             echo "- Package: \`${{ steps.package.outputs.name }}@${{ inputs.version }}\`"
             echo "- Dist-tag: \`${{ inputs.dist-tag }}\`"
             echo "- Already existed: \`${{ steps.existing.outputs.exists }}\`"
+            echo "- Provenance: \`${{ github.event.repository.private == false }}\`"
           } >> "$GITHUB_STEP_SUMMARY"

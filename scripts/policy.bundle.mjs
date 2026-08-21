@@ -1165,6 +1165,25 @@ function validateDeploymentPolicy(policy) {
       }
     }
   }
+  if (policy.d1Migrations === void 0) {
+    policy.d1Migrations = [];
+  } else if (!Array.isArray(policy.d1Migrations)) {
+    throw new Error("deployment d1Migrations must be an array");
+  } else {
+    const seen = /* @__PURE__ */ new Set();
+    for (const name of policy.d1Migrations) {
+      requireString(name, "deployment d1Migrations entry");
+      if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(name)) {
+        throw new Error(
+          `deployment d1Migrations entry ${name} must be a D1 binding or database name`,
+        );
+      }
+      if (seen.has(name)) {
+        throw new Error(`deployment d1Migrations lists ${name} twice`);
+      }
+      seen.add(name);
+    }
+  }
   if (policy.previewReleaseOnMain === void 0) {
     policy.previewReleaseOnMain = !single;
   } else if (typeof policy.previewReleaseOnMain !== "boolean") {
@@ -1255,6 +1274,17 @@ function validateNpmPolicy(policy) {
     policy.versionStrategy = "patch";
   } else if (!["patch", "conventional"].includes(policy.versionStrategy)) {
     throw new Error("npm versionStrategy must be patch or conventional");
+  }
+  if (policy.releasePrefix === void 0) {
+    policy.releasePrefix = "";
+  } else if (
+    typeof policy.releasePrefix !== "string" ||
+    (policy.releasePrefix !== "" &&
+      !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(policy.releasePrefix))
+  ) {
+    throw new Error(
+      "npm releasePrefix must be empty or a lowercase letters-and-numbers slug",
+    );
   }
   return policy;
 }

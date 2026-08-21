@@ -16,8 +16,10 @@ Consumers define:
 - `.github/phala-policy.jsonc` for Phala CVM deployments
 
 Monorepos may keep one policy set per app and pass repository-relative policy
-paths to the reusable workflows. Cloudflare deployment policies can declare a
-lowercase `releasePrefix` so each app has an independent release history.
+paths to the reusable workflows. Cloudflare deployment policies and npm
+policies can declare a lowercase `releasePrefix` so each flow has an
+independent release history — required whenever one repository runs more than
+one release flow.
 
 Quality policy commands are mandatory and independently run: install, lint,
 Prettier, type-check, tests, coverage, and build. Each repository also owns
@@ -172,8 +174,10 @@ Workflows in this repository never create commits or push branches.
 The npm workflow family performs a package dry run on pull requests, publishes
 `v<version>-rc.<run>` with the `next` dist-tag from main, and publishes the
 stable version with `latest` after manual or automatic promotion. Publishing
-uses npm trusted publishing through GitHub OIDC with provenance. It does not
-accept an npm token and does not create version-bump commits.
+uses npm trusted publishing through GitHub OIDC, with provenance when the
+source repository is public — the registry refuses provenance from private
+repositories. It does not accept an npm token and does not create version-bump
+commits.
 
 Example policy:
 
