@@ -779,13 +779,24 @@ test("npm changesets flow publishes with OIDC and API commits only", () => {
   const checkout = release.steps[0];
   assert.equal(checkout.with["fetch-depth"], 0);
   assert.equal(checkout.with["persist-credentials"], false);
-  // The guard runs before any consumer code: a credential it would reject
-  // must never have been in scope for install or build scripts.
+  // The guard runs before any npm invocation at all — the global pin
+  // downloads npm through the generated user config — and so before any
+  // consumer code has a rejected credential in scope.
   const stepNames = release.steps.map((step) => step.name);
   assert.ok(
     stepNames.indexOf("Verify trusted-publishing credentials") <
-      stepNames.indexOf("Install"),
+      stepNames.indexOf("Pin the npm CLI"),
   );
+  assert.ok(
+    stepNames.indexOf("Pin the npm CLI") < stepNames.indexOf("Install"),
+  );
+  // The action resolves the workspace at the repository root; a nested
+  // quality workingDirectory is rejected rather than accommodated.
+  const validate = release.steps.find(
+    (step) => step.name === "Validate invocation",
+  );
+  assert.match(validate.if, /workingDirectory != '\.'/);
+  assert.match(validate.run, /repository root/);
   const publish = release.steps.at(-1);
   assert.equal(publish.with.commitMode, "github-api");
   // Provenance follows source visibility; the registry refuses it from

@@ -100,10 +100,17 @@ jobs:
       pull-requests: write
       # npm trusted publishing (OIDC).
       id-token: write
-    defaults:
-      run:
-        working-directory: ${{ fromJSON(needs.quality.outputs.quality-policy).workingDirectory }}
     steps:
+      # Everything in this job runs at the repository root, because that is
+      # where changesets/action resolves the workspace, the changeset files,
+      # and the CLI. A nested quality workingDirectory would make the quality
+      # gates and this job silently disagree about what repository they are
+      # releasing, so it is rejected rather than accommodated.
+      - name: Validate invocation
+        if: fromJSON(needs.quality.outputs.quality-policy).workingDirectory != '.'
+        run: |
+          echo "::error::npm-changesets.yml requires the Changesets workspace — and the quality policy's workingDirectory — at the repository root."
+          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Changesets reads history and tags to decide what is unpublished.
@@ -120,25 +127,16 @@ jobs:
           node-version: lts/*
           registry-url: https://registry.npmjs.org
       - run: corepack enable
-      - name: Pin the npm CLI
-        # See "npm install-time security" in AGENTS.md. npm 12 is the floor
-        # for both halves of this flow: it enforces the install-time
-        # defaults, and it is well past the 11.5.1 that trusted publishing
-        # needs — Changesets shells out to `npm publish`, whichever package
-        # manager installed the workspace.
-        run: |
-          npm install --global npm@12
-          if [ "$(npm --version | cut -d. -f1)" != "12" ]; then
-            echo "::error::Expected npm 12 on PATH, found $(npm --version). Something is shadowing the pinned CLI."
-            exit 1
-          fi
-      # Before Install, matching npm-publish.yml: a credential this guard
-      # would reject must fail the job before any consumer lifecycle or build
-      # code has had it in scope. This checks what npm will actually
-      # authenticate with, NOT whether a token exists somewhere in secrets —
-      # reading org-level secrets into the environment to assert they are
-      # empty reports the organization's configuration, not this job's, and
-      # fails repositories that never handed npm anything.
+      # Before ANY npm invocation — the global npm pin included, since npm
+      # reads the generated user config and would expand a present credential
+      # while downloading itself — and before Install, so no consumer
+      # lifecycle or build code ever has a rejected credential in scope.
+      #
+      # This checks what npm will actually authenticate with, NOT whether a
+      # token exists somewhere in secrets — reading org-level secrets into
+      # the environment to assert they are empty reports the organization's
+      # configuration, not this job's, and fails repositories that never
+      # handed npm anything.
       - name: Verify trusted-publishing credentials
         run: |
           if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
@@ -174,6 +172,18 @@ jobs:
               exit 1
             fi
           done
+      - name: Pin the npm CLI
+        # See "npm install-time security" in AGENTS.md. npm 12 is the floor
+        # for both halves of this flow: it enforces the install-time
+        # defaults, and it is well past the 11.5.1 that trusted publishing
+        # needs — Changesets shells out to `npm publish`, whichever package
+        # manager installed the workspace.
+        run: |
+          npm install --global npm@12
+          if [ "$(npm --version | cut -d. -f1)" != "12" ]; then
+            echo "::error::Expected npm 12 on PATH, found $(npm --version). Something is shadowing the pinned CLI."
+            exit 1
+          fi
       - name: Install
         run: ${{ fromJSON(needs.quality.outputs.quality-policy).commands.install }}
       # Build before publishing rather than leaning on per-package
