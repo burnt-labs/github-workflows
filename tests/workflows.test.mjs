@@ -776,7 +776,9 @@ test("npm changesets flow publishes with OIDC and API commits only", () => {
   // publish and tagging leaves registry versions with nothing behind them.
   assert.match(release.concurrency.group, /github\.repository/);
   assert.equal(release.concurrency["cancel-in-progress"], false);
-  const checkout = release.steps[0];
+  const checkout = release.steps.find((step) =>
+    step.uses?.startsWith("actions/checkout@"),
+  );
   assert.equal(checkout.with["fetch-depth"], 0);
   assert.equal(checkout.with["persist-credentials"], false);
   // The guard runs before any npm invocation at all — the global pin
