@@ -262,9 +262,11 @@ jobs:
             echo "::error::Cloudflare output did not contain version metadata"
             exit 1
           fi
-          echo "version-id=$VERSION_ID" >> "$GITHUB_OUTPUT"
-          echo "deployment-url=$DEPLOYMENT_URL" >> "$GITHUB_OUTPUT"
-          echo "preview-note=$PREVIEW_NOTE" >> "$GITHUB_OUTPUT"
+          {
+            echo "version-id=$VERSION_ID"
+            echo "deployment-url=$DEPLOYMENT_URL"
+            echo "preview-note=$PREVIEW_NOTE"
+          } >> "$GITHUB_OUTPUT"
           {
             echo "### Cloudflare ${{ inputs.target }} ${{ inputs.operation }}"
             echo "- Tag: \`${{ inputs.version-tag }}\`"
