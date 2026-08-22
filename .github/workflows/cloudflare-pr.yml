@@ -83,6 +83,7 @@ jobs:
       - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           PREVIEW_URL: ${{ needs.preview-candidate.outputs.deployment-url }}
+          PREVIEW_NOTE: ${{ needs.preview-candidate.outputs.preview-note }}
           RELEASE_PREFIX: ${{ fromJSON(needs.quality.outputs.deployment-policy).releasePrefix }}
           VERSION_ID: ${{ needs.preview-candidate.outputs.version-id }}
         with:
@@ -96,6 +97,7 @@ jobs:
               marker,
               `### ${heading}`,
               `- Preview: ${process.env.PREVIEW_URL}`,
+              ...(process.env.PREVIEW_NOTE ? [`- Note: ${process.env.PREVIEW_NOTE}`] : []),
               `- Cloudflare version: \`${process.env.VERSION_ID}\``,
               `- Commit: \`${context.sha}\``,
             ].join('\n')

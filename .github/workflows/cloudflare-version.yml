@@ -43,6 +43,10 @@ on:
         value: ${{ jobs.version.outputs.version-id }}
       deployment-url:
         value: ${{ jobs.version.outputs.deployment-url }}
+      # Non-empty only when a preview produced no preview URL (Durable Object
+      # Workers never get one) and deployment-url fell back to the target.
+      preview-note:
+        value: ${{ jobs.version.outputs.preview-note }}
 
 permissions:
   contents: read
@@ -60,6 +64,7 @@ jobs:
     outputs:
       version-id: ${{ steps.metadata.outputs.version-id }}
       deployment-url: ${{ steps.metadata.outputs.deployment-url }}
+      preview-note: ${{ steps.metadata.outputs.preview-note }}
     defaults:
       run:
         working-directory: ${{ fromJSON(inputs.quality-policy).workingDirectory }}
@@ -237,8 +242,19 @@ jobs:
         run: |
           VERSION_ID=$(printf '%s' "$COMMAND_OUTPUT" | grep -oE '(Worker )?Version ID: +[a-f0-9-]+' | head -1 | grep -oE '[a-f0-9-]{8,}' || true)
           PREVIEW_URL=$(printf '%s' "$COMMAND_OUTPUT" | grep -oE 'https://[^[:space:]]+\.workers\.dev[^[:space:]]*' | head -1 || true)
+          PREVIEW_NOTE=""
           if [ "$OPERATION" = "preview" ]; then
             DEPLOYMENT_URL="${PREVIEW_URL:-$ACTION_URL}"
+            if [ -z "$DEPLOYMENT_URL" ]; then
+              # Cloudflare does not issue preview URLs for Workers that
+              # implement a Durable Object, Containers included — the upload
+              # succeeded and the version exists at 0% traffic, there is just
+              # no URL that serves it. Fall back to the target URL so the
+              # GitHub Environment and the PR comment point somewhere real,
+              # and carry a note so nobody mistakes it for the preview.
+              DEPLOYMENT_URL="$TARGET_URL"
+              PREVIEW_NOTE="no preview URL: Cloudflare does not generate them for Durable Object Workers; the version is uploaded at 0% traffic and the URL above is the live target"
+            fi
           else
             DEPLOYMENT_URL="${TARGET_URL:-$ACTION_URL}"
           fi
@@ -248,10 +264,14 @@ jobs:
           fi
           echo "version-id=$VERSION_ID" >> "$GITHUB_OUTPUT"
           echo "deployment-url=$DEPLOYMENT_URL" >> "$GITHUB_OUTPUT"
+          echo "preview-note=$PREVIEW_NOTE" >> "$GITHUB_OUTPUT"
           {
             echo "### Cloudflare ${{ inputs.target }} ${{ inputs.operation }}"
             echo "- Tag: \`${{ inputs.version-tag }}\`"
             echo "- Version: \`$VERSION_ID\`"
             echo "- URL: $DEPLOYMENT_URL"
+            if [ -n "$PREVIEW_NOTE" ]; then
+              echo "- Note: $PREVIEW_NOTE"
+            fi
             echo "- Source: ${{ inputs.version-message }}"
           } >> "$GITHUB_STEP_SUMMARY"

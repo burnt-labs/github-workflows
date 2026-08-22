@@ -289,6 +289,31 @@ test("Wrangler metadata arguments remain single tokens", () => {
   );
 });
 
+test("preview metadata tolerates Workers without preview URLs", () => {
+  // Cloudflare never generates preview URLs for Workers that implement a
+  // Durable Object (Containers included) — `versions upload` succeeds with a
+  // Version ID and no URL. The metadata step must fall back to the target URL
+  // with an explanatory note instead of failing the preview, and the note must
+  // travel to the caller so cloudflare-pr.yml can surface it in the comment.
+  const source = fs.readFileSync(`${directory}/cloudflare-version.yml`, "utf8");
+  const workflow = parse(source);
+  const metadata = workflow.jobs.version.steps.find(
+    (step) => step.id === "metadata",
+  );
+  assert.match(metadata.run, /DEPLOYMENT_URL="\$TARGET_URL"/);
+  assert.match(metadata.run, /PREVIEW_NOTE=/);
+  assert.match(metadata.run, /Durable Object/);
+  assert.equal(
+    workflow.on.workflow_call.outputs["preview-note"].value,
+    "${{ jobs.version.outputs.preview-note }}",
+  );
+  const pr = parse(fs.readFileSync(`${directory}/cloudflare-pr.yml`, "utf8"));
+  const comment = pr.jobs["publish-preview"].steps.find(
+    (step) => step.env && step.env.PREVIEW_NOTE !== undefined,
+  );
+  assert.ok(comment, "PR comment step must receive the preview note");
+});
+
 test("Worker secrets are allowlisted, never forwarded wholesale", () => {
   // toJSON(secrets) in the publish step contains every secret the caller
   // inherited, the Cloudflare API token included. The allowlist is the entire
