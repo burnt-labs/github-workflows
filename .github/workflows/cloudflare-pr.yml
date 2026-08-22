@@ -31,7 +31,7 @@ jobs:
       github.event_name != 'pull_request' ||
       (github.event.pull_request.draft == false &&
        github.event.pull_request.head.repo.full_name == github.repository)
-    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@46ae18b0f5ff1735e07601e41a6044b358379853 # v1.4.0
+    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@ffc9220f81438c2537163f041f117d3097738fed # v1.4.1
     with:
       quality-policy-path: ${{ inputs.quality-policy-path }}
       deployment-policy-path: ${{ inputs.deployment-policy-path }}
@@ -62,7 +62,7 @@ jobs:
     permissions:
       contents: read
       deployments: write
-    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@46ae18b0f5ff1735e07601e41a6044b358379853 # v1.4.0
+    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@ffc9220f81438c2537163f041f117d3097738fed # v1.4.1
     with:
       operation: preview
       target: candidate
@@ -83,6 +83,7 @@ jobs:
       - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           PREVIEW_URL: ${{ needs.preview-candidate.outputs.deployment-url }}
+          PREVIEW_NOTE: ${{ needs.preview-candidate.outputs.preview-note }}
           RELEASE_PREFIX: ${{ fromJSON(needs.quality.outputs.deployment-policy).releasePrefix }}
           VERSION_ID: ${{ needs.preview-candidate.outputs.version-id }}
         with:
@@ -96,6 +97,7 @@ jobs:
               marker,
               `### ${heading}`,
               `- Preview: ${process.env.PREVIEW_URL}`,
+              ...(process.env.PREVIEW_NOTE ? [`- Note: ${process.env.PREVIEW_NOTE}`] : []),
               `- Cloudflare version: \`${process.env.VERSION_ID}\``,
               `- Commit: \`${context.sha}\``,
             ].join('\n')
