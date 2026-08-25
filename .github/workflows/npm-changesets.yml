@@ -96,7 +96,7 @@ permissions:
 
 jobs:
   quality:
-    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@ffc9220f81438c2537163f041f117d3097738fed # v1.4.1
+    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@e80433becb3bfbd429ade0815c8e012912190205 # v1.4.1
     with:
       quality-policy-path: ${{ inputs.quality-policy-path }}
 
@@ -236,7 +236,7 @@ jobs:
           fi
       - name: Create release pull request or publish to npm
         if: steps.freshness.outputs.stale == 'false'
-        uses: changesets/action@a45c4d594aa4e2c509dc14a9f2b3b67ba3780d0d # v1.9.0
+        uses: changesets/action@8488615a623b1b9c987934bb89eae8af6a946ac1 # v2.1.1
         with:
           title: ${{ inputs.pr-title }}
           commit: ${{ inputs.pr-commit }}
