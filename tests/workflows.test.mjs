@@ -300,6 +300,10 @@ test("Phala deploys a compose file that names the image by digest", () => {
   // than deploy a compose file with an unexpanded variable in it.
   assert.match(render.run, /does not reference/);
   assert.match(render.run, /still appears in the rendered compose file/);
+  // ${VAR:-fallback} must not be substituted. A default image reference is one
+  // a deploy could silently fall back to, which defeats the point of measuring
+  // the compose file at all; it has to fail the placeholder check instead.
+  assert.doesNotMatch(render.run, /\[-\?\]/);
 
   assert.match(deploy.env.COMPOSE_FILE, /steps\.compose\.outputs\.file/);
   assert.doesNotMatch(deploy.env.COMPOSE_FILE, /policy\.outputs/);
@@ -310,6 +314,7 @@ test("Phala deploys a compose file that names the image by digest", () => {
   assert.equal(collect.env.IMAGE, undefined);
 
   const build = steps.find((step) => step.name === "Build and push image");
+  assert.ok(build, "the deploy must build and push the image it deploys");
   assert.equal(
     build.id,
     "build",

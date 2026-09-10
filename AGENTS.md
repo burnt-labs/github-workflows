@@ -171,9 +171,12 @@ the exact bytes running. The consequence is intended: the compose hash changes
 on every deploy, so a relying party's allowlist is re-pinned per deploy. That is
 what pinning means.
 
-A compose file may write the placeholder as `${VAR}` or `${VAR:?message}`. A
-compose file that does not reference the variable fails the deploy, as does one
-where the name survives substitution. The secret named by
+A compose file may write the placeholder as `${VAR}` or `${VAR:?message}`.
+`${VAR:-fallback}` is rejected on purpose: a default image reference is one a
+deploy could silently fall back to, which is the opposite of what an attested
+compose identity is for. A compose file that does not reference the variable in
+an accepted form fails the deploy, as does one where the name survives
+substitution. The secret named by
 `credentials.registryPasswordSecret` is a separate durable read-package
 credential sealed into the CVM for future pulls. Never substitute the ephemeral
 job token for that credential.

@@ -180,10 +180,13 @@ jobs:
           }
           const reference = `${process.env.IMAGE_REPOSITORY}@${digest}`;
           const source = fs.readFileSync(process.env.COMPOSE_FILE, "utf8");
-          // Both spellings a compose file may use for the placeholder: the bare
-          // ${VAR} and the required form ${VAR:?message}. Anything else that
-          // mentions the variable is left alone and caught by the check below.
-          const placeholder = new RegExp(`\\$\\{${variable}(:[-?][^}]*)?\\}`, "g");
+          // The two spellings a compose file may use: the bare ${VAR} and the
+          // required form ${VAR:?message}. The default form ${VAR:-fallback}
+          // is deliberately not matched — a default image reference is one a
+          // deploy could silently fall back to, which is the opposite of what
+          // an attested compose identity is for. It fails the check below
+          // instead. Anything else mentioning the variable is caught there too.
+          const placeholder = new RegExp(`\\$\\{${variable}(:\\?[^}]*)?\\}`, "g");
           const rendered = source.replace(placeholder, reference);
           if (rendered === source) {
             process.stderr.write(`::error::${process.env.COMPOSE_FILE} does not reference \${${variable}}\n`);
