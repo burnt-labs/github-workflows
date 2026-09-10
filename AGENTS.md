@@ -711,8 +711,23 @@ in CI.
 `required-quality.yml` checks this repository out by SHA to get the policy
 scripts. Editing a workflow or a script means every reference to it must move to
 the new commit, including that `ref:`. A stale pin does not error — it silently
-runs the old version. Commit the pin advance separately so it is reviewable, and
-bump again to the merge commit afterwards.
+runs the old version. Commit the pin advance separately so it is reviewable.
+
+Two kinds of pin live here and they do not converge on one SHA, which looks like
+drift and is not. A `uses:` naming a workflow in this repository must point at a
+revision where that workflow is _itself_ already correctly pinned — so it names
+the pin-advance commit, not the commit that changed the workflow. A policy-tool
+or release-metadata `ref:` names the commit the scripts actually landed in,
+because that is where the content is. A commit cannot contain its own SHA, so
+one hop between the two is structural: chasing it produces an infinite regress,
+not lockstep. Check that both carry the same trailing version comment and that
+the `ref:` resolves to the intended script content; do not try to make the two
+numbers equal.
+
+What the rule is really about is the pin that silently resolves _older content_.
+Pinning a caller at the commit that changed a workflow, before the pin advance,
+is exactly that failure: the workflow is there but still checks its scripts out
+at the previous release.
 
 This has bitten twice, both times silently, and both times the symptom appeared
 in a consumer rather than here: a caller pinned before the SHA-pinning work kept
