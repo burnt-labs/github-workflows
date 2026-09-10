@@ -68,7 +68,10 @@ decides what is installed, never how strict a gate is:
   "workingDirectory": ".",
   "toolchain": "rust",
   "commands": {
-    "install": "cargo fetch --locked",
+    // cargo-llvm-cov is a Cargo subcommand, not part of the toolchain: the
+    // quality job installs the compiler, clippy and rustfmt and stops there.
+    // A repository that measures coverage installs its own measuring tool.
+    "install": "rustup component add llvm-tools-preview && cargo install cargo-llvm-cov --locked --version 0.6.24 && cargo fetch --locked",
     "lint": "cargo clippy --workspace --all-targets --locked -- -D warnings",
     "prettier": "cargo fmt --all --check",
     "typeCheck": "cargo check --workspace --all-targets --locked",
