@@ -54,6 +54,38 @@ exists for repository-specific gates that do not fit the seven standard ones —
 dependency compatibility matrices, generated-artifact drift, schema checks. Omit
 the key and the step is skipped.
 
+`toolchain` names what the quality job puts on `PATH` before the commands run:
+`node` (the default, and what every existing consumer gets by omitting the key)
+or `rust`. A `rust` repository is set up from its own `rust-toolchain.toml` with
+clippy and rustfmt, and skips Corepack and the npm CLI pin, which have nothing
+to act on there. The seven commands, the optional eighth, `workingDirectory`,
+and the coverage thresholds behave identically either way — the toolchain
+decides what is installed, never how strict a gate is:
+
+```jsonc
+{
+  "schemaVersion": 1,
+  "workingDirectory": ".",
+  "toolchain": "rust",
+  "commands": {
+    // cargo-llvm-cov is a Cargo subcommand, not part of the toolchain: the
+    // quality job installs the compiler, clippy and rustfmt and stops there.
+    // A repository that measures coverage installs its own measuring tool.
+    "install": "rustup component add llvm-tools-preview && cargo install cargo-llvm-cov --locked --version 0.6.24 && cargo fetch --locked",
+    "lint": "cargo clippy --workspace --all-targets --locked -- -D warnings",
+    "prettier": "cargo fmt --all --check",
+    "typeCheck": "cargo check --workspace --all-targets --locked",
+    "test": "cargo test --workspace --locked",
+    // Every declared threshold has to be enforced by the command; the central
+    // workflow does not cross-check the two. llvm-cov reports no branch data
+    // on stable, so the branches threshold is enforced against regions.
+    "coverage": "cargo llvm-cov --workspace --locked --fail-under-lines 60 --fail-under-functions 60 --fail-under-regions 60",
+    "build": "cargo build --workspace --release --locked",
+  },
+  "coverageThresholds": { "lines": 60, "functions": 60, "branches": 60 },
+}
+```
+
 Deployment policy uses semantic `candidate` and `release` roles:
 
 | Topology   | Candidate   | Release      |

@@ -117,7 +117,10 @@ function phalaPolicy() {
 }
 
 test("quality requires every independent gate", () => {
-  assert.deepEqual(validateQualityPolicy(qualityPolicy()), qualityPolicy());
+  assert.deepEqual(validateQualityPolicy(qualityPolicy()), {
+    ...qualityPolicy(),
+    toolchain: "node",
+  });
   for (const command of ["lint", "prettier", "test", "coverage", "build"]) {
     const policy = qualityPolicy();
     policy.commands[command] = "";
@@ -401,6 +404,28 @@ test("single topology requires both roles to address the same Worker", () => {
     () => validateDeploymentPolicy(policy),
     /targets\.candidate\.url and targets\.release\.url to match/,
   );
+});
+
+test("quality normalizes the toolchain to a literal", () => {
+  // Every existing consumer omits the key, and an omitted key reaching an
+  // `if:` as null casts to the same 0 as false — so the absent case has to
+  // arrive at the workflow as the string "node", not as nothing.
+  assert.equal(validateQualityPolicy(qualityPolicy()).toolchain, "node");
+
+  for (const toolchain of ["node", "rust"]) {
+    const policy = qualityPolicy();
+    policy.toolchain = toolchain;
+    assert.equal(validateQualityPolicy(policy).toolchain, toolchain);
+  }
+
+  for (const toolchain of ["Rust", "go", "", null, 1]) {
+    const policy = qualityPolicy();
+    policy.toolchain = toolchain;
+    assert.throws(
+      () => validateQualityPolicy(policy),
+      /quality toolchain must be node or rust/,
+    );
+  }
 });
 
 test("quality accepts an optional validate command", () => {

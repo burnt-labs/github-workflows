@@ -1025,6 +1025,8 @@ var REQUIRED_COMMANDS = [
   "build",
 ];
 var REQUIRED_COVERAGE_THRESHOLDS = ["lines", "functions", "branches"];
+var TOOLCHAINS = ["node", "rust"];
+var DEFAULT_TOOLCHAIN = "node";
 var TOPOLOGIES = {
   standard: { candidate: "staging", release: "production" },
   chain: { candidate: "testnet", release: "mainnet" },
@@ -1077,6 +1079,11 @@ function validateQualityPolicy(policy) {
     throw new Error("quality schemaVersion must equal 1");
   }
   requireString(policy.workingDirectory, "quality workingDirectory");
+  if (policy.toolchain === void 0) {
+    policy.toolchain = DEFAULT_TOOLCHAIN;
+  } else if (!TOOLCHAINS.includes(policy.toolchain)) {
+    throw new Error(`quality toolchain must be ${TOOLCHAINS.join(" or ")}`);
+  }
   if (!policy.commands || typeof policy.commands !== "object") {
     throw new Error("quality commands must be an object");
   }

@@ -17,6 +17,11 @@ const REQUIRED_COMMANDS = [
   "build",
 ];
 const REQUIRED_COVERAGE_THRESHOLDS = ["lines", "functions", "branches"];
+// What the quality job prepares before it runs a consumer's commands. The
+// commands themselves are the consumer's business; getting a compiler onto
+// PATH is not, which is why this is a closed set rather than a free string.
+const TOOLCHAINS = ["node", "rust"];
+const DEFAULT_TOOLCHAIN = "node";
 // Role to GitHub Environment name. For standard and chain this is also the
 // wrangler environment name. `single` has no wrangler environment at all — see
 // validateDeploymentPolicy.
@@ -76,6 +81,14 @@ export function validateQualityPolicy(policy) {
     throw new Error("quality schemaVersion must equal 1");
   }
   requireString(policy.workingDirectory, "quality workingDirectory");
+  // Normalized to a literal here rather than defaulted at the point of use: an
+  // absent key reaches a workflow `if:` as null, and null casts to the same 0
+  // as false, so every toolchain comparison would quietly select nothing.
+  if (policy.toolchain === undefined) {
+    policy.toolchain = DEFAULT_TOOLCHAIN;
+  } else if (!TOOLCHAINS.includes(policy.toolchain)) {
+    throw new Error(`quality toolchain must be ${TOOLCHAINS.join(" or ")}`);
+  }
   if (!policy.commands || typeof policy.commands !== "object") {
     throw new Error("quality commands must be an object");
   }

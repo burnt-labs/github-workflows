@@ -64,8 +64,11 @@ These are not preferences. Changes that break them will be rejected.
 - Reusable deployment jobs must use the caller repository's actual target
   environment. Do not introduce `preview` or `preview-*` environments.
 - Candidate and release are semantic roles, mapped by repository policy.
-- Require lint, Prettier, type-check, tests, coverage, and build as independent
-  quality gates.
+- Require lint, formatting, type-check, tests, coverage, and build as
+  independent quality gates. The formatting gate is a gate, not a tool. A Node
+  repository fills it with Prettier and a Rust one with rustfmt. Substituting
+  the formatter your language actually uses is expected; dropping the gate, or
+  folding it into lint, is not.
 - Run every direct job on Ubicloud. Use `ubicloud-standard-2` for lightweight
   policy, metadata, and release orchestration jobs; `ubicloud-standard-4` for
   jobs that install, test, build, package, or publish consumer application code;
@@ -176,6 +179,10 @@ caller job that consumes this output.
 {
   "schemaVersion": 1, // must be 1
   "workingDirectory": ".", // where the commands run
+  // "node" (default) or "rust". Selects what the quality job installs before
+  // the commands run, and nothing else. Omit it and the job behaves exactly as
+  // it always has.
+  "toolchain": "node",
   "commands": {
     // All seven are required and run as independent, separately-reported steps.
     "install": "pnpm install --frozen-lockfile",
@@ -195,6 +202,26 @@ caller job that consumes this output.
   "coverageThresholds": { "lines": 80, "functions": 80, "branches": 80 },
 }
 ```
+
+**Toolchains.** `node` sets up Node, enables Corepack, and pins the npm CLI.
+`rust` installs the toolchain the consumer's own `rust-toolchain.toml` pins,
+adds clippy and rustfmt, and skips all three Node steps — the npm pin
+especially, whose PATH assertion would fail a job that has no npm to shadow.
+The set is closed and validated: a repository cannot name a toolchain the
+platform does not prepare, and `scripts/policy.mjs` normalizes the absent key
+to `"node"` rather than letting a null reach an `if:`, where it would cast to
+the same 0 as false and select neither branch.
+
+Two things deliberately stay with the consumer. The action is given no
+`toolchain` input, so the version comes from the file its contributors already
+read rather than from a string here. And `build-warnings` is set empty, because
+the action otherwise exports `CARGO_BUILD_WARNINGS=deny` and makes warning
+strictness a platform decision; `-D warnings` belongs in the consumer's own
+lint command, where it is visible in the policy.
+
+Cargo dependencies are not cached. A cache keyed by this repository's jobs
+across every consumer is its own design question, and a wrong answer is a
+correctness problem, not a slow build.
 
 ### deployment-policy.jsonc
 
@@ -684,8 +711,23 @@ in CI.
 `required-quality.yml` checks this repository out by SHA to get the policy
 scripts. Editing a workflow or a script means every reference to it must move to
 the new commit, including that `ref:`. A stale pin does not error — it silently
-runs the old version. Commit the pin advance separately so it is reviewable, and
-bump again to the merge commit afterwards.
+runs the old version. Commit the pin advance separately so it is reviewable.
+
+Two kinds of pin live here and they do not converge on one SHA, which looks like
+drift and is not. A `uses:` naming a workflow in this repository must point at a
+revision where that workflow is _itself_ already correctly pinned — so it names
+the pin-advance commit, not the commit that changed the workflow. A policy-tool
+or release-metadata `ref:` names the commit the scripts actually landed in,
+because that is where the content is. A commit cannot contain its own SHA, so
+one hop between the two is structural: chasing it produces an infinite regress,
+not lockstep. Check that both carry the same trailing version comment and that
+the `ref:` resolves to the intended script content; do not try to make the two
+numbers equal.
+
+What the rule is really about is the pin that silently resolves _older content_.
+Pinning a caller at the commit that changed a workflow, before the pin advance,
+is exactly that failure: the workflow is there but still checks its scripts out
+at the previous release.
 
 This has bitten twice, both times silently, and both times the symptom appeared
 in a consumer rather than here: a caller pinned before the SHA-pinning work kept
