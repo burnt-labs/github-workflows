@@ -176,6 +176,10 @@ caller job that consumes this output.
 {
   "schemaVersion": 1, // must be 1
   "workingDirectory": ".", // where the commands run
+  // "node" (default) or "rust". Selects what the quality job installs before
+  // the commands run, and nothing else. Omit it and the job behaves exactly as
+  // it always has.
+  "toolchain": "node",
   "commands": {
     // All seven are required and run as independent, separately-reported steps.
     "install": "pnpm install --frozen-lockfile",
@@ -195,6 +199,26 @@ caller job that consumes this output.
   "coverageThresholds": { "lines": 80, "functions": 80, "branches": 80 },
 }
 ```
+
+**Toolchains.** `node` sets up Node, enables Corepack, and pins the npm CLI.
+`rust` installs the toolchain the consumer's own `rust-toolchain.toml` pins,
+adds clippy and rustfmt, and skips all three Node steps — the npm pin
+especially, whose PATH assertion would fail a job that has no npm to shadow.
+The set is closed and validated: a repository cannot name a toolchain the
+platform does not prepare, and `scripts/policy.mjs` normalizes the absent key
+to `"node"` rather than letting a null reach an `if:`, where it would cast to
+the same 0 as false and select neither branch.
+
+Two things deliberately stay with the consumer. The action is given no
+`toolchain` input, so the version comes from the file its contributors already
+read rather than from a string here. And `build-warnings` is set empty, because
+the action otherwise exports `CARGO_BUILD_WARNINGS=deny` and makes warning
+strictness a platform decision; `-D warnings` belongs in the consumer's own
+lint command, where it is visible in the policy.
+
+Cargo dependencies are not cached. A cache keyed by this repository's jobs
+across every consumer is its own design question, and a wrong answer is a
+correctness problem, not a slow build.
 
 ### deployment-policy.jsonc
 

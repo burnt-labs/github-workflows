@@ -111,19 +111,42 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Setup Node
+        if: fromJSON(needs.policy.outputs.quality).toolchain == 'node'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: lts/*
       - name: Enable Corepack
+        if: fromJSON(needs.policy.outputs.quality).toolchain == 'node'
         run: corepack enable
       - name: Pin the npm CLI
         # See "npm install-time security" in AGENTS.md.
+        if: fromJSON(needs.policy.outputs.quality).toolchain == 'node'
         run: |
           npm install --global npm@12
           if [ "$(npm --version | cut -d. -f1)" != "12" ]; then
             echo "::error::Expected npm 12 on PATH, found $(npm --version). Something is shadowing the pinned CLI."
             exit 1
           fi
+      - name: Setup Rust
+        if: fromJSON(needs.policy.outputs.quality).toolchain == 'rust'
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+        with:
+          # No toolchain named here on purpose: with the input empty the action
+          # installs whatever the consumer's rust-toolchain.toml pins, which is
+          # the file its own contributors already read.
+          rust-src-dir: ${{ fromJSON(needs.policy.outputs.quality).workingDirectory }}
+          components: clippy, rustfmt
+          # Strictness belongs to the consumer's lint command, not to this job.
+          # Left at its default the action exports CARGO_BUILD_WARNINGS=deny,
+          # which turns every warning in the workspace into a platform-layer
+          # decision nobody declared.
+          build-warnings: ""
+          cache: false
+      - name: Report the Rust toolchain
+        if: fromJSON(needs.policy.outputs.quality).toolchain == 'rust'
+        run: |
+          cargo --version
+          rustc --version
       - name: Install
         run: ${{ fromJSON(needs.policy.outputs.quality).commands.install }}
       - name: Lint

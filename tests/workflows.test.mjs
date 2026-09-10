@@ -98,6 +98,61 @@ test("required quality supports ruleset events without filters", () => {
   }
 });
 
+test("quality prepares exactly one toolchain", () => {
+  const workflow = parse(
+    fs.readFileSync(`${directory}/required-quality.yml`, "utf8"),
+  );
+  const steps = workflow.jobs.quality.steps;
+  const guard = (toolchain) =>
+    `fromJSON(needs.policy.outputs.quality).toolchain == '${toolchain}'`;
+
+  const byToolchain = { node: [], rust: [] };
+  for (const step of steps) {
+    for (const toolchain of Object.keys(byToolchain)) {
+      if (step.if === guard(toolchain)) byToolchain[toolchain].push(step.name);
+    }
+  }
+
+  // The npm CLI pin is the one that matters most: a Rust consumer has no
+  // package.json for it to act on, and the assertion inside it would fail the
+  // job on a runner where npm is absent entirely.
+  assert.deepEqual(byToolchain.node, [
+    "Setup Node",
+    "Enable Corepack",
+    "Pin the npm CLI",
+  ]);
+  assert.deepEqual(byToolchain.rust, [
+    "Setup Rust",
+    "Report the Rust toolchain",
+  ]);
+
+  // Setup has to precede the commands, and the commands themselves stay
+  // unconditional — a gate that quietly skips is worse than one that fails.
+  const names = steps.map((step) => step.name);
+  const commandSteps = steps.filter((step) =>
+    /fromJSON\(needs\.policy\.outputs\.quality\)\.commands\./.test(
+      step.run ?? "",
+    ),
+  );
+  assert.equal(commandSteps.length, 8);
+  for (const step of commandSteps) {
+    if (step.name === "Validate") continue;
+    assert.equal(step.if, undefined, `${step.name} must not be conditional`);
+  }
+  assert.ok(
+    names.indexOf("Setup Rust") < names.indexOf("Install"),
+    "the toolchain must be on PATH before the install command runs",
+  );
+
+  const setupRust = steps.find((step) => step.name === "Setup Rust");
+  assert.equal(setupRust.with.toolchain, undefined);
+  assert.equal(setupRust.with["build-warnings"], "");
+  assert.match(
+    setupRust.with["rust-src-dir"],
+    /needs\.policy\.outputs\.quality\)\.workingDirectory/,
+  );
+});
+
 test("required quality accepts app-scoped policy paths", () => {
   const source = fs.readFileSync(`${directory}/required-quality.yml`, "utf8");
   const workflow = parse(source);
