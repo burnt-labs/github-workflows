@@ -39,7 +39,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: burnt-labs/github-workflows
-          ref: 8373e9454803608c670431a67bd416178c633144 # v1.5.0
+          ref: ed309eaa57dfea000dfe6f4fbcb3c5c16773cd6e # v1.6.0
           path: .burnt-workflows
       - id: policy
         name: Require and validate Phala policy
@@ -47,7 +47,7 @@ jobs:
 
   quality:
     needs: policy
-    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@cf3eb33ac3deeb6aaff90165702ce5e4e73b6688 # v1.5.0
+    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@ed309eaa57dfea000dfe6f4fbcb3c5c16773cd6e # v1.6.0
 
   deploy:
     name: Phala ${{ inputs.target }}
