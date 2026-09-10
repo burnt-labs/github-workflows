@@ -31,7 +31,7 @@ jobs:
       github.event_name != 'pull_request' ||
       (github.event.pull_request.draft == false &&
        github.event.pull_request.head.repo.full_name == github.repository)
-    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@8373e9454803608c670431a67bd416178c633144 # v1.5.0
+    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@cf3eb33ac3deeb6aaff90165702ce5e4e73b6688 # v1.5.0
     with:
       quality-policy-path: ${{ inputs.quality-policy-path }}
       deployment-policy-path: ${{ inputs.deployment-policy-path }}
@@ -62,7 +62,7 @@ jobs:
     permissions:
       contents: read
       deployments: write
-    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@8373e9454803608c670431a67bd416178c633144 # v1.5.0
+    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@cf3eb33ac3deeb6aaff90165702ce5e4e73b6688 # v1.5.0
     with:
       operation: preview
       target: candidate
