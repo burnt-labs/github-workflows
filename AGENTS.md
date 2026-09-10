@@ -157,7 +157,23 @@ orchestration.
 ```
 
 The image is always tagged with the deploying commit SHA and pushed to GHCR.
-The Actions job token pushes it. The secret named by
+The Actions job token pushes it.
+
+`image.composeVariable` is expanded into the compose file before the deploy,
+not delivered to the CVM as an environment variable. dstack hashes the compose
+text it receives, and that hash is the only part of the attested identity that
+says anything about the application — the platform measurement covers the base
+dstack OS image. Left as a variable, the compose hash is stable across deploys
+and binds the topology while the image arrives outside anything measured, so an
+overwritten tag would run different bytes under an unchanged attested identity.
+Expanded, and expanded _by digest_ rather than by the commit tag, the hash names
+the exact bytes running. The consequence is intended: the compose hash changes
+on every deploy, so a relying party's allowlist is re-pinned per deploy. That is
+what pinning means.
+
+A compose file may write the placeholder as `${VAR}` or `${VAR:?message}`. A
+compose file that does not reference the variable fails the deploy, as does one
+where the name survives substitution. The secret named by
 `credentials.registryPasswordSecret` is a separate durable read-package
 credential sealed into the CVM for future pulls. Never substitute the ephemeral
 job token for that credential.

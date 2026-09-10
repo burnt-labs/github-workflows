@@ -78,7 +78,10 @@ jobs:
           IMAGE_NAME: ${{ fromJSON(needs.policy.outputs.phala).image.name }}
         run: |
           repository="$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
-          echo "image=ghcr.io/${repository}/${IMAGE_NAME}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          {
+            echo "repository=ghcr.io/${repository}/${IMAGE_NAME}"
+            echo "image=ghcr.io/${repository}/${IMAGE_NAME}:${GITHUB_SHA}"
+          } >> "$GITHUB_OUTPUT"
       - name: Collect deployment credentials and runtime configuration
         env:
           ALL_SECRETS: ${{ toJSON(secrets) }}
@@ -87,8 +90,6 @@ jobs:
           REGISTRY_PASSWORD_NAME: ${{ fromJSON(needs.policy.outputs.phala).credentials.registryPasswordSecret }}
           SECRET_NAMES: ${{ toJSON(fromJSON(needs.policy.outputs.phala).runtimeSecrets) }}
           VARIABLE_NAMES: ${{ toJSON(fromJSON(needs.policy.outputs.phala).runtimeVariables) }}
-          IMAGE_VARIABLE: ${{ fromJSON(needs.policy.outputs.phala).image.composeVariable }}
-          IMAGE: ${{ steps.image.outputs.image }}
           REGISTRY_USERNAME: ${{ fromJSON(needs.policy.outputs.phala).image.registryUsername }}
         run: |
           node - <<'NODE'
@@ -112,7 +113,6 @@ jobs:
           const environment = Object.fromEntries([
             ...secretNames.map((name) => [name, secrets[name]]),
             ...variableNames.map((name) => [name, variables[name]]),
-            [process.env.IMAGE_VARIABLE, process.env.IMAGE],
             ["DSTACK_DOCKER_REGISTRY", "ghcr.io"],
             ["DSTACK_DOCKER_USERNAME", process.env.REGISTRY_USERNAME],
             ["DSTACK_DOCKER_PASSWORD", registryPassword],
@@ -145,16 +145,63 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
       - name: Build and push image
+        id: build
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: ${{ fromJSON(needs.policy.outputs.phala).image.context }}
           file: ${{ fromJSON(needs.policy.outputs.phala).image.dockerfile }}
           push: true
           tags: ${{ steps.image.outputs.image }}
+      # dstack hashes the compose text it is given, and that hash is what a
+      # relying party's allowlist checks. Substituting the image here rather
+      # than delivering it as a CVM environment variable is the whole point:
+      # expanded, the attested compose identity names the exact bytes running;
+      # left as a variable, it names the topology and nothing about the
+      # application. The reference is by digest, not by the commit tag, because
+      # a tag can be repointed after the deploy.
+      - name: Render the compose file
+        id: compose
+        env:
+          COMPOSE_FILE: ${{ fromJSON(needs.policy.outputs.phala).composeFile }}
+          WORKING_DIRECTORY: ${{ fromJSON(needs.policy.outputs.phala).workingDirectory }}
+          IMAGE_VARIABLE: ${{ fromJSON(needs.policy.outputs.phala).image.composeVariable }}
+          IMAGE_REPOSITORY: ${{ steps.image.outputs.repository }}
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          cd "$WORKING_DIRECTORY"
+          node - <<'NODE'
+          const fs = require("node:fs");
+          const path = require("node:path");
+          const variable = process.env.IMAGE_VARIABLE;
+          const digest = process.env.IMAGE_DIGEST;
+          if (!/^sha256:[0-9a-f]{64}$/.test(digest ?? "")) {
+            process.stderr.write(`::error::The image push reported no usable digest: ${digest}\n`);
+            process.exit(1);
+          }
+          const reference = `${process.env.IMAGE_REPOSITORY}@${digest}`;
+          const source = fs.readFileSync(process.env.COMPOSE_FILE, "utf8");
+          // Both spellings a compose file may use for the placeholder: the bare
+          // ${VAR} and the required form ${VAR:?message}. Anything else that
+          // mentions the variable is left alone and caught by the check below.
+          const placeholder = new RegExp(`\\$\\{${variable}(:[-?][^}]*)?\\}`, "g");
+          const rendered = source.replace(placeholder, reference);
+          if (rendered === source) {
+            process.stderr.write(`::error::${process.env.COMPOSE_FILE} does not reference \${${variable}}\n`);
+            process.exit(1);
+          }
+          if (rendered.includes(variable)) {
+            process.stderr.write(`::error::${variable} still appears in the rendered compose file\n`);
+            process.exit(1);
+          }
+          const target = path.join(process.env.RUNNER_TEMP, "phala-compose.yaml");
+          fs.writeFileSync(target, rendered);
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `file=${target}\n`);
+          process.stdout.write(`Deploying ${reference}\n`);
+          NODE
       - name: Deploy CVM
         env:
           CVM_NAME: ${{ fromJSON(needs.policy.outputs.phala).targets[inputs.target].cvmName }}
-          COMPOSE_FILE: ${{ fromJSON(needs.policy.outputs.phala).composeFile }}
+          COMPOSE_FILE: ${{ steps.compose.outputs.file }}
           WORKING_DIRECTORY: ${{ fromJSON(needs.policy.outputs.phala).workingDirectory }}
         run: |
           cd "$WORKING_DIRECTORY"
