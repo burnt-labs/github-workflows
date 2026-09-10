@@ -337,6 +337,12 @@ jobs:
     secrets: inherit
 ```
 
+`image.composeVariable` is substituted into the compose file before the deploy,
+by digest, so the compose hash dstack measures names the exact image running. It
+is not delivered to the CVM as an environment variable. The compose hash
+therefore changes on every deploy and relying-party allowlists are re-pinned per
+deploy.
+
 The credential fields and `runtimeSecrets` select exact names from the target
 GitHub Environment's inherited secrets; `runtimeVariables` selects exact names
 from its variables. A missing declared value fails before build or deploy. The

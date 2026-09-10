@@ -27,7 +27,7 @@ permissions:
 
 jobs:
   quality:
-    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@cf3eb33ac3deeb6aaff90165702ce5e4e73b6688 # v1.5.0
+    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@992944a4d890e517aa314204e5dceb49a42555c3 # v1.6.0
     with:
       quality-policy-path: ${{ inputs.quality-policy-path }}
       deployment-policy-path: ${{ inputs.deployment-policy-path }}
@@ -46,7 +46,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: burnt-labs/github-workflows
-          ref: cf3eb33ac3deeb6aaff90165702ce5e4e73b6688 # v1.5.0
+          ref: ed309eaa57dfea000dfe6f4fbcb3c5c16773cd6e # v1.6.0
           path: .burnt-workflows
       - name: Read stable release tags
         env:
@@ -76,7 +76,7 @@ jobs:
     permissions:
       contents: read
       deployments: write
-    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@cf3eb33ac3deeb6aaff90165702ce5e4e73b6688 # v1.5.0
+    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@992944a4d890e517aa314204e5dceb49a42555c3 # v1.6.0
     with:
       # Under single topology the candidate and the release are the same
       # Worker, so deploying here would serve the merge immediately and there
@@ -98,7 +98,7 @@ jobs:
     permissions:
       contents: read
       deployments: write
-    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@cf3eb33ac3deeb6aaff90165702ce5e4e73b6688 # v1.5.0
+    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@992944a4d890e517aa314204e5dceb49a42555c3 # v1.6.0
     with:
       operation: preview
       target: release
@@ -184,7 +184,7 @@ jobs:
     permissions:
       contents: read
       deployments: write
-    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@cf3eb33ac3deeb6aaff90165702ce5e4e73b6688 # v1.5.0
+    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@992944a4d890e517aa314204e5dceb49a42555c3 # v1.6.0
     with:
       operation: deploy
       target: release
