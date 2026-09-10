@@ -76,7 +76,10 @@ decides what is installed, never how strict a gate is:
     "prettier": "cargo fmt --all --check",
     "typeCheck": "cargo check --workspace --all-targets --locked",
     "test": "cargo test --workspace --locked",
-    "coverage": "cargo llvm-cov --workspace --locked --fail-under-lines 60",
+    // Every declared threshold has to be enforced by the command; the central
+    // workflow does not cross-check the two. llvm-cov reports no branch data
+    // on stable, so the branches threshold is enforced against regions.
+    "coverage": "cargo llvm-cov --workspace --locked --fail-under-lines 60 --fail-under-functions 60 --fail-under-regions 60",
     "build": "cargo build --workspace --release --locked",
   },
   "coverageThresholds": { "lines": 60, "functions": 60, "branches": 60 },

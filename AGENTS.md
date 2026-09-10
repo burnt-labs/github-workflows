@@ -64,8 +64,11 @@ These are not preferences. Changes that break them will be rejected.
 - Reusable deployment jobs must use the caller repository's actual target
   environment. Do not introduce `preview` or `preview-*` environments.
 - Candidate and release are semantic roles, mapped by repository policy.
-- Require lint, Prettier, type-check, tests, coverage, and build as independent
-  quality gates.
+- Require lint, formatting, type-check, tests, coverage, and build as
+  independent quality gates. The formatting gate is a gate, not a tool. A Node
+  repository fills it with Prettier and a Rust one with rustfmt. Substituting
+  the formatter your language actually uses is expected; dropping the gate, or
+  folding it into lint, is not.
 - Run every direct job on Ubicloud. Use `ubicloud-standard-2` for lightweight
   policy, metadata, and release orchestration jobs; `ubicloud-standard-4` for
   jobs that install, test, build, package, or publish consumer application code;
