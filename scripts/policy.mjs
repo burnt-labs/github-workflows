@@ -497,13 +497,14 @@ export function validatePhalaPolicy(policy) {
       } catch {
         throw new Error(`Phala targets.${role}.publicUrl must be a URL`);
       }
+      // Compare the raw value, not the parsed one: the workflow uses the raw
+      // string, and URL parsing drops what it normalizes away (an empty `?` or
+      // `#`, surrounding whitespace, embedded tabs and newlines), so a value
+      // that parses to a bare origin can still request something else.
       if (
         url.protocol !== "https:" ||
-        url.pathname !== "/" ||
-        url.search ||
-        url.hash ||
-        url.username ||
-        url.password
+        (target.publicUrl !== url.origin &&
+          target.publicUrl !== `${url.origin}/`)
       ) {
         throw new Error(
           `Phala targets.${role}.publicUrl must be a bare https:// origin`,

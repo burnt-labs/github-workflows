@@ -1421,11 +1421,8 @@ function validatePhalaPolicy(policy) {
       }
       if (
         url.protocol !== "https:" ||
-        url.pathname !== "/" ||
-        url.search ||
-        url.hash ||
-        url.username ||
-        url.password
+        (target.publicUrl !== url.origin &&
+          target.publicUrl !== `${url.origin}/`)
       ) {
         throw new Error(
           `Phala targets.${role}.publicUrl must be a bare https:// origin`,

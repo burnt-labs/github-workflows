@@ -9,7 +9,7 @@ on:
         type: string
     outputs:
       deployment-url:
-        description: Public HTTPS endpoint reported by Phala
+        description: Public HTTPS endpoint that passed the health check (the target's publicUrl when set, otherwise the one Phala reports)
         value: ${{ jobs.deploy.outputs.deployment-url }}
 
 permissions:
