@@ -46,7 +46,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: burnt-labs/github-workflows
-          ref: ed309eaa57dfea000dfe6f4fbcb3c5c16773cd6e # v1.6.0
+          ref: d7e4d93a212430e14a60f811f6bb07e7e93d1c98 # v1.7.0
           path: .burnt-workflows
       - name: Read stable release tags
         env:
