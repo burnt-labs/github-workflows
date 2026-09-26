@@ -201,8 +201,15 @@ jobs:
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `file=${target}\n`);
           process.stdout.write(`Deploying ${reference}\n`);
           NODE
+      # Only a candidate CVM is created on a miss. A release CVM carries
+      # identity that lives outside this flow: DNS that names its app id, and
+      # relying-party allowlists that name its measurements. Creating a new one
+      # because the named CVM was deleted or renamed would deploy an instance
+      # none of that points at, and report success. A release target is
+      # provisioned by hand once, then only ever updated by id here.
       - name: Deploy CVM
         env:
+          TARGET_ROLE: ${{ inputs.target }}
           CVM_NAME: ${{ fromJSON(needs.policy.outputs.phala).targets[inputs.target].cvmName }}
           COMPOSE_FILE: ${{ steps.compose.outputs.file }}
           WORKING_DIRECTORY: ${{ fromJSON(needs.policy.outputs.phala).workingDirectory }}
@@ -225,8 +232,11 @@ jobs:
               exit 1
             fi
             target=(--cvm-id "$existing_id")
-          else
+          elif [ "$TARGET_ROLE" = "candidate" ]; then
             target=(-n "$CVM_NAME")
+          else
+            echo "::error::No Phala CVM is named $CVM_NAME. The $TARGET_ROLE target is never created by this workflow; provision it by hand, or restore the name, then rerun"
+            exit 1
           fi
           npx --yes phala@1.1.20 deploy \
             -c "$COMPOSE_FILE" \

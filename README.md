@@ -272,7 +272,10 @@ pnpm 10 already default-denies build scripts, so pnpm consumers see no change.
 `phala-deploy.yml` is an application-neutral deployment primitive. It requires
 the repository's quality gates, builds a commit-addressed private GHCR image,
 deploys or updates the selected Phala CVM, resolves and health-checks its public
-HTTPS endpoint, and returns that URL to the caller. It does not know about a
+HTTPS endpoint, and returns that URL to the caller. Only the candidate CVM is
+created when missing; the release CVM must already exist (provision it by hand
+once), and a release deploy that finds no CVM of that name fails rather than
+creating one. It does not know about a
 consumer's service names, secret bundle format, GitHub variables, or dependent
 workflows.
 
