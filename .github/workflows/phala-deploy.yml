@@ -238,7 +238,16 @@ jobs:
         id: phala-url
         env:
           CVM_NAME: ${{ fromJSON(needs.policy.outputs.phala).targets[inputs.target].cvmName }}
+          PUBLIC_URL: ${{ fromJSON(needs.policy.outputs.phala).targets[inputs.target].publicUrl }}
         run: |
+          # A target that terminates TLS inside the CVM (dstack-ingress, TLS
+          # passthrough) is not reachable at the URL Phala reports: that one
+          # expects the gateway to terminate TLS. Such a target names the URL it
+          # actually serves in policy, and the health check goes there instead.
+          if [ -n "$PUBLIC_URL" ]; then
+            echo "deployment-url=${PUBLIC_URL%/}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           PHALA_API_KEY="$(<"$RUNNER_TEMP/phala-api-key")"
           npx --yes phala@1.1.20 cvms get "$CVM_NAME" --json --api-key "$PHALA_API_KEY" > "$RUNNER_TEMP/phala-cvm.json"
           deployment_url="$(jq -r '

@@ -1411,6 +1411,27 @@ function validatePhalaPolicy(policy) {
       `Phala targets.${role}.githubEnvironment`,
     );
     requireString(target.cvmName, `Phala targets.${role}.cvmName`);
+    if (target.publicUrl !== void 0) {
+      requireString(target.publicUrl, `Phala targets.${role}.publicUrl`);
+      let url;
+      try {
+        url = new URL(target.publicUrl);
+      } catch {
+        throw new Error(`Phala targets.${role}.publicUrl must be a URL`);
+      }
+      if (
+        url.protocol !== "https:" ||
+        url.pathname !== "/" ||
+        url.search ||
+        url.hash ||
+        url.username ||
+        url.password
+      ) {
+        throw new Error(
+          `Phala targets.${role}.publicUrl must be a bare https:// origin`,
+        );
+      }
+    }
     if (!/^[a-z](?!.*--)[a-z0-9-]{3,61}[a-z0-9]$/.test(target.cvmName)) {
       throw new Error(
         `Phala targets.${role}.cvmName must be 5-63 characters, start with a lowercase letter, end with a letter or digit, and contain no consecutive hyphens`,

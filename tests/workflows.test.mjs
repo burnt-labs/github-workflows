@@ -358,6 +358,7 @@ test("Phala deployment is serialized and updates CVMs by id", () => {
 test("Phala health checks fail closed and URL propagation stays caller-owned", () => {
   const source = fs.readFileSync(`${directory}/phala-deploy.yml`, "utf8");
   assert.match(source, /health check failed after 30 attempts/);
+  assert.match(source, /targets\[inputs\.target\]\.publicUrl/);
   assert.doesNotMatch(source, /gh variable|gh workflow run|Synchronize/);
   assert.doesNotMatch(source, /::warning::/);
 });

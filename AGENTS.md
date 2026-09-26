@@ -188,6 +188,12 @@ Missing declared values fail before build or deploy. Credential names, dstack
 registry variables, and `image.composeVariable` are reserved and cannot also be
 runtime configuration.
 
+A target may add `publicUrl`, a bare `https://` origin. The health check and
+the returned `deployment-url` use it instead of the URL Phala reports. It exists
+for services that terminate TLS inside the CVM (dstack-ingress with TLS
+passthrough): Phala reports a gateway-terminated URL those services do not
+answer on.
+
 The workflow returns `deployment-url` and does not mutate GitHub variables or
 dispatch another workflow. Application-specific URL propagation belongs in a
 caller job that consumes this output.
