@@ -188,6 +188,21 @@ Missing declared values fail before build or deploy. Credential names, dstack
 registry variables, and `image.composeVariable` are reserved and cannot also be
 runtime configuration.
 
+A target may add `publicUrl`, a bare `https://` origin. The health check and
+the returned `deployment-url` use it instead of the URL Phala reports. It exists
+for services that terminate TLS inside the CVM (dstack-ingress with TLS
+passthrough): Phala reports a gateway-terminated URL those services do not
+answer on.
+
+The deploy looks the target's CVM up by exact name and updates it by id. Only
+the candidate is created when no CVM has that name. **The release CVM is never
+created by this workflow**: a miss fails the deploy. A release CVM's identity
+lives outside this flow (DNS naming its app id, relying-party allowlists naming
+its measurements), so a CVM deleted or renamed between a caller's checks and
+the deploy must not come back as a new instance that nothing points at while
+the run reports success. Provision the release CVM by hand once, before its
+first release deploy; this is unconditional rather than a policy knob.
+
 The workflow returns `deployment-url` and does not mutate GitHub variables or
 dispatch another workflow. Application-specific URL propagation belongs in a
 caller job that consumes this output.

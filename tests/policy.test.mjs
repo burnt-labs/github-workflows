@@ -477,6 +477,32 @@ test("Phala requires concrete deployment and image fields", () => {
   }
 });
 
+test("Phala targets may name the public URL they serve", () => {
+  const policy = phalaPolicy();
+  policy.targets.release.publicUrl = "https://service.example.com";
+  assert.deepEqual(validatePhalaPolicy(structuredClone(policy)), policy);
+  policy.targets.candidate.publicUrl = "https://service.example.com/";
+  assert.deepEqual(validatePhalaPolicy(structuredClone(policy)), policy);
+  for (const publicUrl of [
+    "",
+    "service.example.com",
+    "http://service.example.com",
+    "https://service.example.com/health",
+    "https://service.example.com?x=1",
+    "https://service.example.com?",
+    "https://service.example.com#",
+    "https://service.example.com/?",
+    " https://service.example.com",
+    "https://service.example.com\n",
+    "https://service.exam\nple.com",
+    "https://user@service.example.com",
+  ]) {
+    const invalid = phalaPolicy();
+    invalid.targets.candidate.publicUrl = publicUrl;
+    assert.throws(() => validatePhalaPolicy(invalid), /publicUrl/);
+  }
+});
+
 test("Phala environment forwarding is explicit and cannot include credentials", () => {
   for (const name of [
     "PHALA_CLOUD_API_KEY",

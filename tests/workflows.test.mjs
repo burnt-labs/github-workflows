@@ -355,9 +355,98 @@ test("Phala deployment is serialized and updates CVMs by id", () => {
   assert.match(source, /has no id/);
 });
 
+test("Phala never creates the release CVM", (t) => {
+  // A release CVM's identity lives outside this flow: DNS names its app id and
+  // relying-party allowlists name its measurements. If the named CVM is gone
+  // by the time the deploy looks it up, creating a new one serves an instance
+  // none of that points at, and the run still goes green. Only a candidate may
+  // be created on a miss; a release is updated by id or the deploy fails.
+  const workflow = parse(
+    fs.readFileSync(`${directory}/phala-deploy.yml`, "utf8"),
+  );
+  const deploy = workflow.jobs.deploy.steps.find(
+    (step) => step.name === "Deploy CVM",
+  );
+  assert.equal(deploy.env.TARGET_ROLE, "${{ inputs.target }}");
+
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "phala-deploy-"));
+  t.after(() => fs.rmSync(root, { recursive: true }));
+  const bin = path.join(root, "bin");
+  fs.mkdirSync(bin);
+  // Stands in for `npx --yes phala@1.1.20 …`: answers `cvms list` from a
+  // fixture and records every `deploy` argument vector, one per line.
+  fs.writeFileSync(
+    path.join(bin, "npx"),
+    [
+      "#!/usr/bin/env bash",
+      "set -euo pipefail",
+      "shift 2 # --yes phala@1.1.20",
+      'case "$1" in',
+      '  cvms) cat "$FIXTURE" ;;',
+      '  deploy) shift; printf "%s\\n" "$*" >> "$DEPLOY_LOG" ;;',
+      '  *) echo "unexpected phala command: $*" >&2; exit 2 ;;',
+      "esac",
+      "",
+    ].join("\n"),
+    { mode: 0o755 },
+  );
+  fs.writeFileSync(path.join(root, "phala-api-key"), "test-key");
+
+  const cvm = (name, id) => ({ name, id });
+  const cases = [
+    { role: "release", items: [], status: 1 },
+    // A near-miss name is not the CVM; the search is a substring match.
+    { role: "release", items: [cvm("service-production-old", "a")], status: 1 },
+    { role: "release", items: [cvm("service-production", "b")], status: 0 },
+    { role: "candidate", items: [], status: 0 },
+    { role: "candidate", items: [cvm("service-production", "c")], status: 0 },
+    // Anything that is not the candidate role is refused creation too.
+    { role: "", items: [], status: 1 },
+  ];
+  for (const [index, { role, items, status }] of cases.entries()) {
+    const label = `${role || "(empty)"} with ${JSON.stringify(items)}`;
+    const fixture = path.join(root, `cvms-${index}.json`);
+    const deployLog = path.join(root, `deploy-${index}.log`);
+    fs.writeFileSync(fixture, JSON.stringify({ items }));
+    fs.writeFileSync(deployLog, "");
+    const result = spawnSync("bash", ["-euo", "pipefail", "-c", deploy.run], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+        RUNNER_TEMP: root,
+        WORKING_DIRECTORY: root,
+        TARGET_ROLE: role,
+        CVM_NAME: "service-production",
+        COMPOSE_FILE: path.join(root, "compose.yaml"),
+        FIXTURE: fixture,
+        DEPLOY_LOG: deployLog,
+      },
+    });
+    assert.equal(result.status, status, `${label}: ${result.stderr}`);
+    const deploys = fs.readFileSync(deployLog, "utf8");
+    const existing = items.find((item) => item.name === "service-production");
+
+    if (role !== "candidate") {
+      // The release path never passes -n, whatever the lookup returned.
+      assert.doesNotMatch(deploys, /(^| )-n( |$)/m, label);
+    }
+    if (status !== 0) {
+      assert.equal(deploys, "", `${label}: nothing may be deployed`);
+      assert.match(result.stdout, /::error::No Phala CVM is named/, label);
+    } else if (existing) {
+      assert.match(deploys, new RegExp(`--cvm-id ${existing.id} `), label);
+      assert.doesNotMatch(deploys, /(^| )-n( |$)/m, label);
+    } else {
+      assert.match(deploys, /(^| )-n service-production /, label);
+    }
+  }
+});
+
 test("Phala health checks fail closed and URL propagation stays caller-owned", () => {
   const source = fs.readFileSync(`${directory}/phala-deploy.yml`, "utf8");
   assert.match(source, /health check failed after 30 attempts/);
+  assert.match(source, /targets\[inputs\.target\]\.publicUrl/);
   assert.doesNotMatch(source, /gh variable|gh workflow run|Synchronize/);
   assert.doesNotMatch(source, /::warning::/);
 });

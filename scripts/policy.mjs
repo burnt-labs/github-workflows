@@ -489,6 +489,28 @@ export function validatePhalaPolicy(policy) {
       `Phala targets.${role}.githubEnvironment`,
     );
     requireString(target.cvmName, `Phala targets.${role}.cvmName`);
+    if (target.publicUrl !== undefined) {
+      requireString(target.publicUrl, `Phala targets.${role}.publicUrl`);
+      let url;
+      try {
+        url = new URL(target.publicUrl);
+      } catch {
+        throw new Error(`Phala targets.${role}.publicUrl must be a URL`);
+      }
+      // Compare the raw value, not the parsed one: the workflow uses the raw
+      // string, and URL parsing drops what it normalizes away (an empty `?` or
+      // `#`, surrounding whitespace, embedded tabs and newlines), so a value
+      // that parses to a bare origin can still request something else.
+      if (
+        url.protocol !== "https:" ||
+        (target.publicUrl !== url.origin &&
+          target.publicUrl !== `${url.origin}/`)
+      ) {
+        throw new Error(
+          `Phala targets.${role}.publicUrl must be a bare https:// origin`,
+        );
+      }
+    }
     if (!/^[a-z](?!.*--)[a-z0-9-]{3,61}[a-z0-9]$/.test(target.cvmName)) {
       throw new Error(
         `Phala targets.${role}.cvmName must be 5-63 characters, start with a lowercase letter, end with a letter or digit, and contain no consecutive hyphens`,
