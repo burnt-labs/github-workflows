@@ -161,15 +161,19 @@ jobs:
       # available to them and GitHub is the only place they can hold a secret.
       # This carries the declared ones across.
       #
-      # Deploy only, never preview. `wrangler secret bulk` creates a Worker
-      # version and deploys it immediately, so running it on a preview would
-      # serve an intermediate version — on a chain repository that means mainnet
-      # starts serving off a job whose entire purpose is to *not* serve. A
-      # preview therefore runs against whatever secrets are already on the
-      # Worker, which is the same thing it does for bindings.
+      # Deploy only, never preview. A preview must not change what a target's
+      # secrets are, and on a chain repository the release target's secrets are
+      # mainnet's. A preview therefore runs against whatever secrets are already
+      # on the Worker, which is the same thing it does for bindings.
       #
-      # Two steps, deliberately. The first has the secrets but no Cloudflare
-      # credential and runs only jq from the runner image. The second has the
+      # This step writes the file; the deploy step below uploads it with the new
+      # version (`deploy --secrets-file`). A separate `wrangler secret` edit is
+      # deliberately not used: it edits the *latest* version and fails with
+      # Cloudflare error 10215 when that version is an undeployed upload, which
+      # is the normal state after any preview or single-topology candidate.
+      #
+      # Two steps, deliberately. This one has the secrets but no Cloudflare
+      # credential and runs only jq from the runner image. The deploy has the
       # credential but is SHA-pinned code. Neither has both a consumer-resolved
       # binary and the token.
       - name: Collect Worker secrets
@@ -193,26 +197,6 @@ jobs:
           jq -n --argjson all "$ALL_SECRETS" --argjson want "$WANTED" \
             '$want | map({key: ., value: $all[.]}) | from_entries' > "$RUNNER_TEMP/worker-secrets.json"
           echo "Publishing $(jq -r 'keys | join(", ")' "$RUNNER_TEMP/worker-secrets.json")"
-      - name: Publish Worker secrets
-        if: steps.worker-secrets.outcome == 'success'
-        # The same pinned action that performs the deploy. Running wrangler out
-        # of the consumer's node_modules instead would put a caller-resolved
-        # binary next to the deployment credential, and would also fail outright
-        # for a consumer that lets this action supply wrangler rather than
-        # depending on it directly.
-        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
-        with:
-          apiToken: ${{ secrets.cloudflare-api-token || secrets.BURNT_CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.cloudflare-account-id || secrets.BURNT_CLOUDFLARE_ACCOUNT_ID }}
-          # deployment-policy.workingDirectory, matching the deploy step below.
-          # wrangler resolves its configuration relative to the working
-          # directory, and a monorepo consumer whose quality and deployment
-          # directories differ would otherwise update a different Worker or none.
-          workingDirectory: ${{ fromJSON(inputs.deployment-policy).workingDirectory }}
-          packageManager: ${{ fromJSON(inputs.deployment-policy).packageManager }}
-          command: >-
-            secret bulk ${{ runner.temp }}/worker-secrets.json
-            ${{ fromJSON(inputs.deployment-policy).topology != 'single' && format('--env {0}', fromJSON(inputs.deployment-policy).targets[inputs.target].wranglerEnv) || '' }}
       - name: Upload or deploy Worker version
         id: wrangler
         uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
@@ -227,11 +211,19 @@ jobs:
           # second form falls through to the right-hand side every time and
           # would always pass --env. Under single topology there is no wrangler
           # environment to name and passing one fails the deploy.
+          #
+          # --secrets-file follows the same shape. The collect step succeeds only
+          # on a deploy with a non-empty workerSecrets, so a preview never gets
+          # the flag. It needs wrangler 4.74.0 or newer.
           command: >-
             ${{ inputs.operation == 'preview' && 'versions upload' || 'deploy' }}
             ${{ fromJSON(inputs.deployment-policy).topology != 'single' && format('--env {0}', fromJSON(inputs.deployment-policy).targets[inputs.target].wranglerEnv) || '' }}
             --message=${{ inputs.version-tag }}
             --tag "${{ inputs.version-tag }}"
+            ${{ steps.worker-secrets.outcome == 'success' && format('--secrets-file {0}/worker-secrets.json', runner.temp) || '' }}
+      - name: Remove Worker secrets file
+        if: always() && steps.worker-secrets.outcome == 'success'
+        run: rm -f "$RUNNER_TEMP/worker-secrets.json"
       - name: Extract Cloudflare metadata
         id: metadata
         env:
