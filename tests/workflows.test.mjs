@@ -551,6 +551,10 @@ test("Worker secrets ride on the pinned deploy, not a separate secret edit", () 
   const deploy = steps.find((step) => step.id === "wrangler");
   assert.match(deploy.uses, /^cloudflare\/wrangler-action@[0-9a-f]{40}$/);
   assert.match(
+    deploy.with.workingDirectory,
+    /deployment-policy\)\.workingDirectory/,
+  );
+  assert.match(
     deploy.with.command,
     /steps\.worker-secrets\.outcome == 'success' && format\('--secrets-file /,
   );
