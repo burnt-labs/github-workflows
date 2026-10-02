@@ -470,8 +470,10 @@ deploy carries the declared ones across:
 ```
 
 Each name must exist as a secret on the target GitHub Environment. Before
-creating the version, `cloudflare-version.yml` collects them and runs
-`wrangler secret bulk`, so the version picks them up.
+creating the version, `cloudflare-version.yml` collects them and passes them to
+the deploy as `--secrets-file`, so the new version is created with them. The
+consumer's wrangler must be 4.74.0 or newer, the first release with
+`--secrets-file`.
 
 **The allowlist is the entire safety property.** `toJSON(secrets)` in that step
 contains every secret the caller inherited, the Cloudflare API token included.
@@ -483,13 +485,15 @@ not skip the secret and carry on — absent configuration that degrades quietly 
 how a Worker ends up running without a credential it needs and reporting
 success.
 
-**Secrets are published on deploy, never on preview.** `wrangler secret bulk`
-creates a Worker version and deploys it immediately, so running it on a preview
-would serve an intermediate version — on a `chain` repository that means mainnet
-starts serving from a job whose entire purpose is not to serve. A preview
-therefore runs against whatever secrets are already on the Worker, the same way
-it inherits its bindings. A brand-new secret is live from the first deploy that
-publishes it, not from the preview before it.
+**Secrets are published on deploy, never on preview.** A preview must not
+change what a target's secrets are, and on `chain` the release target's secrets
+are mainnet's. A preview therefore runs against whatever secrets are already on
+the Worker, the same way it inherits its bindings. A brand-new secret is live
+from the first deploy that publishes it, not from the preview before it.
+
+`wrangler secret bulk` is deliberately not used: it edits the _latest_ version
+and fails with Cloudflare error 10215 when that version is an undeployed upload,
+which is the normal state after any preview or `single`-topology candidate.
 
 **Removing a name from `workerSecrets` does not revoke it.** The list is an
 upsert, not a reconciliation: the deploy sets what it names and leaves

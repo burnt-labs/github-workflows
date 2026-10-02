@@ -524,9 +524,8 @@ test("Worker secrets are allowlisted, never forwarded wholesale", () => {
 });
 
 test("Worker secrets are published on deploy but never on preview", () => {
-  // `wrangler secret bulk` creates a version and deploys it immediately, so
-  // doing this on a preview would serve an intermediate version — on a chain
-  // repository, straight to mainnet from a job whose purpose is not to serve.
+  // A preview must not change what a target's secrets are, and on a chain
+  // repository the release target's secrets are mainnet's.
   const workflow = parse(
     fs.readFileSync(`${directory}/cloudflare-version.yml`, "utf8"),
   );
@@ -536,21 +535,32 @@ test("Worker secrets are published on deploy but never on preview", () => {
   assert.match(collect.if, /inputs\.operation == 'deploy'/);
 });
 
-test("Worker secrets are published by the pinned action, not consumer wrangler", () => {
-  // Resolving wrangler from the consumer's node_modules would put a
-  // caller-controlled binary in the same step as the deployment credential.
+test("Worker secrets ride on the pinned deploy, not a separate secret edit", () => {
+  // `wrangler secret bulk` edits the latest version and fails with 10215
+  // when that version is an undeployed 0% upload, which every single-topology
+  // flow leaves behind. `deploy --secrets-file` creates the version with the
+  // secrets instead.
   const workflow = parse(
     fs.readFileSync(`${directory}/cloudflare-version.yml`, "utf8"),
   );
-  const publish = workflow.jobs.version.steps.find(
-    (step) => step.name === "Publish Worker secrets",
+  const steps = workflow.jobs.version.steps;
+  assert.equal(
+    steps.find((step) => step.name === "Publish Worker secrets"),
+    undefined,
   );
-  assert.match(publish.uses, /^cloudflare\/wrangler-action@[0-9a-f]{40}$/);
-  assert.match(publish.command ?? publish.with.command, /secret bulk/);
+  const deploy = steps.find((step) => step.id === "wrangler");
+  assert.match(deploy.uses, /^cloudflare\/wrangler-action@[0-9a-f]{40}$/);
   assert.match(
-    publish.with.workingDirectory,
+    deploy.with.workingDirectory,
     /deployment-policy\)\.workingDirectory/,
   );
+  assert.match(
+    deploy.with.command,
+    /steps\.worker-secrets\.outcome == 'success' && format\('--secrets-file /,
+  );
+  assert.doesNotMatch(deploy.with.command, /&& ''/);
+  const source = fs.readFileSync(`${directory}/cloudflare-version.yml`, "utf8");
+  assert.doesNotMatch(source, /secret bulk/);
 });
 
 test("a missing declared Worker secret fails the deploy", () => {
