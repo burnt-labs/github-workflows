@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   quality:
-    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@3332fc8e0049b837e851778cb1fb2be1f24acb1a # v1.7.0
+    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@d3096758fcd3e5bbc5a9622b8f1f5182b80aab86 # v1.7.0
 
   pack:
     name: Package dry run
@@ -19,7 +19,7 @@ jobs:
         working-directory: ${{ fromJSON(needs.quality.outputs.npm-policy).workingDirectory }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: lts/*
           registry-url: https://registry.npmjs.org
