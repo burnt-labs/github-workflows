@@ -109,8 +109,38 @@ jobs:
           fi
       - name: Install
         run: ${{ fromJSON(inputs.quality-policy).commands.install }}
+      # Build-time configuration from the target GitHub Environment's vars.
+      # Bundlers such as Vite inline these when they build, so a value set on
+      # the Environment does nothing unless the build step has it.
+      #
+      # Preview and deploy alike, unlike Worker secrets: the build is the
+      # artifact being previewed, and reading a variable changes nothing on
+      # the target. Allowlisted by policy because `vars` holds every variable
+      # the job can see, not only the ones the build needs. The values reach
+      # the Build step only, never the steps that hold the Cloudflare token.
+      - name: Collect build variables
+        id: build-variables
+        if: fromJSON(inputs.deployment-policy).buildVariables[0] != null
+        env:
+          ALL_VARIABLES: ${{ toJSON(vars) }}
+          WANTED: ${{ toJSON(fromJSON(inputs.deployment-policy).buildVariables) }}
+        run: |
+          missing=$(jq -rn --argjson all "$ALL_VARIABLES" --argjson want "$WANTED" \
+            '$want | map(select(($all[.] // "") == "")) | join(" ")')
+          if [ -n "$missing" ]; then
+            echo "::error::Declared buildVariables not set in this GitHub Environment: $missing"
+            exit 1
+          fi
+          jq -rn --argjson all "$ALL_VARIABLES" --argjson want "$WANTED" \
+            '$want[] | "export \(.)=\($all[.] | @sh)"' > "$RUNNER_TEMP/build-variables.sh"
+          echo "Building with $(jq -rn --argjson want "$WANTED" '$want | join(", ")')"
       - name: Build
-        run: ${{ fromJSON(inputs.quality-policy).commands.build }}
+        env:
+          BUILD_VARIABLES: ${{ steps.build-variables.outcome == 'success' && format('{0}/build-variables.sh', runner.temp) || '' }}
+        run: |
+          # shellcheck source=/dev/null
+          if [ -n "$BUILD_VARIABLES" ]; then . "$BUILD_VARIABLES"; fi
+          ${{ fromJSON(inputs.quality-policy).commands.build }}
       # D1 migrations declared in the deployment policy apply here, before the
       # new version deploys, so the schema the code was written against exists
       # by the time that code serves. Deploy only, never preview — the same

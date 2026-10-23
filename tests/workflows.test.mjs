@@ -916,6 +916,86 @@ test("npm provenance follows source repository visibility", () => {
   );
 });
 
+test("build variables are allowlisted and reach the build on every operation", (t) => {
+  // Bundlers inline these at build time, so an Environment variable the
+  // build step cannot see does nothing. The build is the artifact a preview
+  // exercises, so previews get them too; reading a variable mutates nothing.
+  const workflow = parse(
+    fs.readFileSync(`${directory}/cloudflare-version.yml`, "utf8"),
+  );
+  const steps = workflow.jobs.version.steps;
+  const collect = steps.find((step) => step.id === "build-variables");
+  const build = steps.find((step) => step.name === "Build");
+  assert.equal(
+    collect.if,
+    "fromJSON(inputs.deployment-policy).buildVariables[0] != null",
+  );
+  assert.doesNotMatch(collect.if, /inputs\.operation/);
+  assert.match(collect.env.WANTED, /deployment-policy\)\.buildVariables/);
+  assert.equal(collect.env.ALL_VARIABLES, "${{ toJSON(vars) }}");
+  assert.ok(steps.indexOf(collect) < steps.indexOf(build));
+  assert.match(
+    build.env.BUILD_VARIABLES,
+    /steps\.build-variables\.outcome == 'success' && format\(/,
+  );
+  assert.doesNotMatch(build.env.BUILD_VARIABLES, /&& ''/);
+  assert.match(build.run, /quality-policy\)\.commands\.build/);
+  // Scoped to the Build step: nothing writes them to GITHUB_ENV, where the
+  // steps holding the Cloudflare token would inherit them.
+  assert.doesNotMatch(collect.run, /GITHUB_ENV/);
+
+  const runnerTemp = fs.mkdtempSync(path.join(os.tmpdir(), "build-vars-"));
+  t.after(() => fs.rmSync(runnerTemp, { recursive: true }));
+  const variables = {
+    VITE_REFRESH_INTERVAL: "1000",
+    VITE_QUOTED: 'it\'s $HOME `id` "x"\nsecond line',
+    NOT_DECLARED: "left out",
+  };
+  const run = (wanted) =>
+    spawnSync("bash", ["-euo", "pipefail", "-c", collect.run], {
+      env: {
+        ...process.env,
+        RUNNER_TEMP: runnerTemp,
+        ALL_VARIABLES: JSON.stringify(variables),
+        WANTED: JSON.stringify(wanted),
+      },
+      encoding: "utf8",
+    });
+
+  const collected = run(["VITE_REFRESH_INTERVAL", "VITE_QUOTED"]);
+  assert.equal(collected.status, 0, collected.stderr);
+  const sourced = spawnSync(
+    "bash",
+    [
+      "-euo",
+      "pipefail",
+      "-c",
+      ". \"$BUILD_VARIABLES\"; node -e 'process.stdout.write(JSON.stringify({a: process.env.VITE_REFRESH_INTERVAL, b: process.env.VITE_QUOTED, c: process.env.NOT_DECLARED ?? null}))'",
+    ],
+    {
+      env: {
+        PATH: process.env.PATH,
+        BUILD_VARIABLES: path.join(runnerTemp, "build-variables.sh"),
+      },
+      encoding: "utf8",
+    },
+  );
+  assert.equal(sourced.status, 0, sourced.stderr);
+  assert.deepEqual(JSON.parse(sourced.stdout), {
+    a: "1000",
+    b: variables.VITE_QUOTED,
+    c: null,
+  });
+
+  // Absent configuration fails the run instead of building with defaults.
+  const missing = run(["VITE_REFRESH_INTERVAL", "VITE_NOT_SET"]);
+  assert.notEqual(missing.status, 0);
+  assert.match(
+    missing.stdout,
+    /Declared buildVariables not set in this GitHub Environment: VITE_NOT_SET/,
+  );
+});
+
 test("D1 migrations run on deploy only and render from policy", (t) => {
   const workflow = parse(
     fs.readFileSync(`${directory}/cloudflare-version.yml`, "utf8"),

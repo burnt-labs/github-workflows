@@ -196,6 +196,44 @@ export function validateDeploymentPolicy(policy) {
     }
   }
 
+  // GitHub Environment variable names exported to the consumer's build
+  // command. Bundlers such as Vite inline `VITE_*` values when they build, so
+  // a value set on the Environment does nothing unless the build step has it.
+  //
+  // An allowlist for the same reason workerSecrets is one: the `vars` context
+  // holds every organization, repository and environment variable the job can
+  // see, and the build runs consumer code.
+  if (policy.buildVariables === undefined) {
+    policy.buildVariables = [];
+  } else {
+    // A build variable named like the deployment credential would shadow it
+    // for every tool in the build that reads it from the environment
+    // (wrangler reads CLOUDFLARE_API_TOKEN), so the value of a plain,
+    // unmasked variable would stand in for the credential.
+    const seen = validateEnvironmentNames(
+      policy.buildVariables,
+      "deployment buildVariables",
+      [
+        "BURNT_CLOUDFLARE_API_TOKEN",
+        "BURNT_CLOUDFLARE_ACCOUNT_ID",
+        "CLOUDFLARE_API_TOKEN",
+        "CLOUDFLARE_ACCOUNT_ID",
+        "GITHUB_TOKEN",
+      ],
+    );
+    // A build variable is plain configuration: unmasked in logs, and shipped
+    // to every browser when it carries a bundler's public prefix. One name
+    // declared as both is a value meant to be secret about to be treated as
+    // configuration, or the reverse.
+    for (const name of policy.workerSecrets) {
+      if (seen.has(name)) {
+        throw new Error(
+          `deployment ${name} cannot be both a workerSecret and a buildVariable`,
+        );
+      }
+    }
+  }
+
   // D1 databases whose migrations apply before each deploy, by binding or
   // database name — whichever `wrangler d1 migrations apply` should receive.
   // In policy for the same reason workerSecrets is: the alternative is every

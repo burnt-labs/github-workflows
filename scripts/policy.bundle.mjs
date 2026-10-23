@@ -1172,6 +1172,28 @@ function validateDeploymentPolicy(policy) {
       }
     }
   }
+  if (policy.buildVariables === void 0) {
+    policy.buildVariables = [];
+  } else {
+    const seen = validateEnvironmentNames(
+      policy.buildVariables,
+      "deployment buildVariables",
+      [
+        "BURNT_CLOUDFLARE_API_TOKEN",
+        "BURNT_CLOUDFLARE_ACCOUNT_ID",
+        "CLOUDFLARE_API_TOKEN",
+        "CLOUDFLARE_ACCOUNT_ID",
+        "GITHUB_TOKEN",
+      ],
+    );
+    for (const name of policy.workerSecrets) {
+      if (seen.has(name)) {
+        throw new Error(
+          `deployment ${name} cannot be both a workerSecret and a buildVariable`,
+        );
+      }
+    }
+  }
   if (policy.d1Migrations === void 0) {
     policy.d1Migrations = [];
   } else if (!Array.isArray(policy.d1Migrations)) {

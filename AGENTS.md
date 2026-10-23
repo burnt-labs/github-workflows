@@ -273,6 +273,9 @@ correctness problem, not a slow build.
   // Optional. GitHub Environment secret names published as Worker secrets
   // before each deploy. See "Worker secrets" below.
   "workerSecrets": ["STYTCH_SECRET"],
+  // Optional. GitHub Environment variable names exported to the build. See
+  // "Build variables" below.
+  "buildVariables": ["VITE_API_URL"],
   // Optional. D1 databases whose migrations apply before each deploy. See
   // "D1 migrations" below.
   "d1Migrations": ["DEVTOOL_DB"],
@@ -509,6 +512,42 @@ Callers that use this must pass `secrets: inherit` rather than the two named
 secrets, because inherited secrets arrive under their own names. Both forms
 work: `cloudflare-version.yml` resolves `cloudflare-api-token` first and falls
 back to `BURNT_CLOUDFLARE_API_TOKEN`, and fails loudly if neither is present.
+
+### Build variables
+
+Bundlers such as Vite inline `VITE_*` values when they build, so a value that
+lives only on a GitHub Environment does nothing: the build step never sees it,
+and the deployed bundle carries the code's defaults. Declare the names the
+build needs and the deploy exports them to it:
+
+```jsonc
+{
+  "buildVariables": ["VITE_REFRESH_INTERVAL", "VITE_RECENT_BLOCK_LIMIT"],
+}
+```
+
+Each name must exist as a variable (not a secret) on the target GitHub
+Environment, or at repository or organization level, where GitHub resolves it
+the usual way. `cloudflare-version.yml` selects the declared names from `vars`,
+writes them shell-quoted to a file under `RUNNER_TEMP`, and the Build step
+sources it before running `commands.build`. They reach the Build step only,
+never the steps that hold the Cloudflare token, and never `GITHUB_ENV`.
+
+**Preview and deploy alike.** Unlike Worker secrets and D1 migrations, reading
+a variable changes nothing on the target, and the build is the thing a preview
+exists to exercise. A pull-request preview of the candidate builds with the
+candidate Environment's values.
+
+A declared name with no value **fails the build**, for the same reason a
+missing Worker secret fails the deploy: a bundle built with silent defaults
+reports success and behaves differently from what the Environment says.
+
+They are configuration, not secrets: unmasked in logs, and shipped to every
+browser when they carry a bundler's public prefix. The validator rejects a name
+that is also in `workerSecrets`, and the deployment credential names, which a
+build variable would otherwise shadow for every tool reading them from the
+environment. The required quality job's build does not receive them; a
+consumer's build must still succeed on its defaults.
 
 ### D1 migrations
 

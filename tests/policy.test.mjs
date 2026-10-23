@@ -158,6 +158,7 @@ test("deployment accepts only exact topology environments", () => {
       previewReleaseOnMain: true,
       releasePrefix: "",
       workerSecrets: [],
+      buildVariables: [],
       d1Migrations: [],
     });
   }
@@ -251,6 +252,77 @@ test("workerSecrets rejects malformed and duplicated names", () => {
   const notArray = deploymentPolicy();
   notArray.workerSecrets = "API_KEY";
   assert.throws(() => validateDeploymentPolicy(notArray), /must be an array/);
+});
+
+test("buildVariables defaults to none and accepts uppercase names", () => {
+  assert.deepEqual(
+    validateDeploymentPolicy(deploymentPolicy()).buildVariables,
+    [],
+  );
+
+  const named = deploymentPolicy();
+  named.buildVariables = ["VITE_REFRESH_INTERVAL", "VITE_RECENT_BLOCK_LIMIT"];
+  assert.deepEqual(validateDeploymentPolicy(named).buildVariables, [
+    "VITE_REFRESH_INTERVAL",
+    "VITE_RECENT_BLOCK_LIMIT",
+  ]);
+});
+
+test("buildVariables rejects malformed and duplicated names", () => {
+  for (const [name, message] of [
+    ["vite_lowercase", /uppercase environment-variable name/],
+    ["1_LEADING_DIGIT", /uppercase environment-variable name/],
+    ["HAS-DASH", /uppercase environment-variable name/],
+    ["", /buildVariables entry/],
+  ]) {
+    const policy = deploymentPolicy();
+    policy.buildVariables = [name];
+    assert.throws(() => validateDeploymentPolicy(policy), message);
+  }
+
+  const duplicated = deploymentPolicy();
+  duplicated.buildVariables = ["VITE_A", "VITE_A"];
+  assert.throws(
+    () => validateDeploymentPolicy(duplicated),
+    /lists VITE_A twice/,
+  );
+
+  const notArray = deploymentPolicy();
+  notArray.buildVariables = "VITE_A";
+  assert.throws(
+    () => validateDeploymentPolicy(notArray),
+    /buildVariables must be an array/,
+  );
+});
+
+test("buildVariables cannot shadow the deployment credential", () => {
+  // The build runs with these exported. A plain variable named like the
+  // credential would stand in for it for any tool that reads it from the
+  // environment.
+  for (const reserved of [
+    "BURNT_CLOUDFLARE_API_TOKEN",
+    "BURNT_CLOUDFLARE_ACCOUNT_ID",
+    "CLOUDFLARE_API_TOKEN",
+    "CLOUDFLARE_ACCOUNT_ID",
+    "GITHUB_TOKEN",
+  ]) {
+    const policy = deploymentPolicy();
+    policy.buildVariables = [reserved];
+    assert.throws(
+      () => validateDeploymentPolicy(policy),
+      /must not include reserved name/,
+    );
+  }
+});
+
+test("a name cannot be both a workerSecret and a buildVariable", () => {
+  const policy = deploymentPolicy();
+  policy.workerSecrets = ["API_KEY"];
+  policy.buildVariables = ["API_KEY"];
+  assert.throws(
+    () => validateDeploymentPolicy(policy),
+    /API_KEY cannot be both a workerSecret and a buildVariable/,
+  );
 });
 
 test("d1Migrations accepts binding and database names, defaults empty", () => {
