@@ -27,7 +27,7 @@ permissions:
 
 jobs:
   quality:
-    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@d3096758fcd3e5bbc5a9622b8f1f5182b80aab86 # v1.7.0
+    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@9dc68f706a554af697772bd0b8a7a7c558fc448a # v1.8.0
     with:
       quality-policy-path: ${{ inputs.quality-policy-path }}
       deployment-policy-path: ${{ inputs.deployment-policy-path }}
@@ -76,7 +76,7 @@ jobs:
     permissions:
       contents: read
       deployments: write
-    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@d3096758fcd3e5bbc5a9622b8f1f5182b80aab86 # v1.7.1
+    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@9dc68f706a554af697772bd0b8a7a7c558fc448a # v1.8.0
     with:
       # Under single topology the candidate and the release are the same
       # Worker, so deploying here would serve the merge immediately and there
@@ -98,7 +98,7 @@ jobs:
     permissions:
       contents: read
       deployments: write
-    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@d3096758fcd3e5bbc5a9622b8f1f5182b80aab86 # v1.7.1
+    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@9dc68f706a554af697772bd0b8a7a7c558fc448a # v1.8.0
     with:
       operation: preview
       target: release
@@ -184,7 +184,7 @@ jobs:
     permissions:
       contents: read
       deployments: write
-    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@d3096758fcd3e5bbc5a9622b8f1f5182b80aab86 # v1.7.1
+    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@9dc68f706a554af697772bd0b8a7a7c558fc448a # v1.8.0
     with:
       operation: deploy
       target: release
