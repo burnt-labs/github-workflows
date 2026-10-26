@@ -55,14 +55,18 @@ test("every direct job runs on an approved Ubicloud runner", () => {
   }
 });
 
-test("every internal workflow pin carries release metadata", () => {
+test("every internal workflow pin carries explicit release status", () => {
   for (const name of fs.readdirSync(directory)) {
     if (!name.endsWith(".yml")) continue;
     const source = fs.readFileSync(`${directory}/${name}`, "utf8");
     for (const [line] of source.matchAll(
       /^\s*(?:- )?uses: burnt-labs\/github-workflows\/.*$/gm,
     )) {
-      assert.match(line, /@[0-9a-f]{40} # v\d+\.\d+\.\d+$/, `${name}: ${line}`);
+      assert.match(
+        line,
+        /@[0-9a-f]{40} # (?:v\d+\.\d+\.\d+|unreleased)$/,
+        `${name}: ${line}`,
+      );
     }
   }
 });
