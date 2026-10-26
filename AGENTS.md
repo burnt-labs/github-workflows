@@ -293,11 +293,40 @@ correctness problem, not a slow build.
 }
 ```
 
-Topology fixes the environment names for `standard` and `chain`. `standard`
+Topology fixes the GitHub Environment names for `standard` and `chain`. `standard`
 maps candidate to `staging` and release to `production`; `chain` maps them to
 `testnet` and `mainnet`.
-`githubEnvironment` must equal `wranglerEnv`, and neither may be `preview` or
-start with `preview-`.
+`wranglerEnv` is an explicit lowercase slug and may differ from the GitHub
+Environment, for existing versioned services such as `staging-v2`/`live-v2`.
+Candidate and release must use distinct Wrangler environments. GitHub
+Environments may never be `preview` or start with `preview-`.
+
+Container Workers declare `"containers": true` to build on
+`ubicloud-standard-8`; other Workers retain `ubicloud-standard-4`.
+
+Each target may declare `wranglerConfig`, a JSON/JSONC path relative to the
+deployment working directory. It is passed to both D1 migrations and the Worker
+upload/deploy. A generated file beside the source config preserves its relative
+entrypoint, Docker and migrations paths without changing tracked source.
+
+Targets may declare `commands.prepare`, `commands.beforeDeploy` and
+`commands.afterDeploy`. Preparation runs after install and before build for
+both uploads and deployments. It receives `GITHUB_ENVIRONMENT_VARIABLES_JSON`,
+the selected environment's nonsecret Actions variables, and must validate any
+configuration document it consumes. Do not print that snapshot. Deployment
+hooks run only on deploy, before D1 migrations and after the Worker deployment,
+with the centrally selected Cloudflare credentials. Missing declared Worker
+secrets fail before the first deployment hook. Every hook runs from the
+deployment working directory and its failure stops the run. Deployments are
+serialized per repository, working directory and real target environment, with
+cancellation disabled so a consumer handoff cannot be interrupted by a newer
+run. Hooks must be idempotent and fail closed; they must not restore an old
+deployment automatically.
+
+These lifecycle commands serve provisioning, queue consumer transfers and
+application verification without putting credential handling in consumer
+workflows. The explicit shared-workflow migration request authorizes this
+capability before a second consumer adopts it.
 
 `single` is the third topology, for Workers with no wrangler `env` block. Both
 roles are the same Worker, so promotion splits by traffic rather than by

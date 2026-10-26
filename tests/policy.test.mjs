@@ -151,7 +151,7 @@ test("quality requires repository-owned coverage thresholds", () => {
   );
 });
 
-test("deployment accepts only exact topology environments", () => {
+test("deployment accepts the topology environments", () => {
   for (const topology of ["standard", "chain"]) {
     assert.deepEqual(validateDeploymentPolicy(deploymentPolicy(topology)), {
       ...deploymentPolicy(topology),
@@ -159,6 +159,7 @@ test("deployment accepts only exact topology environments", () => {
       releasePrefix: "",
       workerSecrets: [],
       d1Migrations: [],
+      containers: false,
     });
   }
 });
@@ -553,7 +554,7 @@ test("deployment rejects preview-specific environments", () => {
   policy.targets.candidate.githubEnvironment = "preview-staging";
   assert.throws(
     () => validateDeploymentPolicy(policy),
-    /must equal wranglerEnv|preview-specific/,
+    /requires targets.candidate.githubEnvironment=staging|preview-specific/,
   );
 });
 
@@ -608,5 +609,72 @@ test("npm accepts a release prefix for repositories with other flows", () => {
       () => validateNpmPolicy(malformed),
       /releasePrefix must be empty or a lowercase letters-and-numbers slug/,
     );
+  }
+});
+
+test("deployment maps existing Wrangler names to real GitHub Environments", () => {
+  const policy = deploymentPolicy();
+  policy.targets.candidate.wranglerEnv = "staging-v2";
+  policy.targets.release.wranglerEnv = "live-v2";
+  assert.equal(
+    validateDeploymentPolicy(policy).targets.release.githubEnvironment,
+    "production",
+  );
+  for (const name of ["--env", "with space", "Prod", "staging;id"]) {
+    const invalid = deploymentPolicy();
+    invalid.targets.candidate.wranglerEnv = name;
+    assert.throws(
+      () => validateDeploymentPolicy(invalid),
+      /wranglerEnv must be/,
+    );
+  }
+  policy.targets.release.wranglerEnv = "staging-v2";
+  assert.throws(
+    () => validateDeploymentPolicy(policy),
+    /distinct Wrangler environments/,
+  );
+});
+
+test("deployment validates container capacity, generated config and lifecycle commands", () => {
+  const policy = deploymentPolicy();
+  policy.containers = true;
+  policy.targets.candidate.wranglerConfig = ".generated/staging/wrangler.jsonc";
+  policy.targets.candidate.commands = {
+    prepare: "node prepare.mjs",
+    beforeDeploy: "node provision.mjs",
+    afterDeploy: "node verify.mjs",
+  };
+  assert.equal(validateDeploymentPolicy(policy).containers, true);
+  for (const containers of [null, "true", 8]) {
+    assert.throws(
+      () => validateDeploymentPolicy({ ...deploymentPolicy(), containers }),
+      /containers must be a boolean/,
+    );
+  }
+  for (const config of [
+    "../wrangler.jsonc",
+    "/tmp/wrangler.jsonc",
+    "wrangler.jsonc --env live",
+    "wrangler.toml",
+    "a/../../wrangler.json",
+  ]) {
+    const invalid = deploymentPolicy();
+    invalid.targets.candidate.wranglerConfig = config;
+    assert.throws(
+      () => validateDeploymentPolicy(invalid),
+      /wranglerConfig must be/,
+    );
+  }
+  for (const commands of [
+    null,
+    [],
+    "deploy",
+    { prepare: "" },
+    { beforeDeploy: " " },
+    { typo: "true" },
+  ]) {
+    const invalid = deploymentPolicy();
+    invalid.targets.candidate.commands = commands;
+    assert.throws(() => validateDeploymentPolicy(invalid), /commands/);
   }
 });

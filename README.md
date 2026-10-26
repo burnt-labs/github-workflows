@@ -97,6 +97,20 @@ Deployment policy uses semantic `candidate` and `release` roles:
 Preview deployments use the actual target environment. `preview` and
 `preview-*` GitHub Environments are invalid.
 
+The topology fixes GitHub Environment names. Each target's `wranglerEnv` may
+name an existing service environment such as `staging-v2` or `live-v2`; the two
+roles must remain distinct. Set `containers: true` for a container build runner.
+
+Targets may set a relative `wranglerConfig` path and `commands.prepare`,
+`commands.beforeDeploy`, and `commands.afterDeploy`. Preparation receives the
+selected Actions variables as `GITHUB_ENVIRONMENT_VARIABLES_JSON` and runs
+before build for both preview and deploy. Use it to validate a single public
+configuration document and generate JSONC. The generated config is used for
+both migrations and the Worker. Before/after deployment commands receive the
+Cloudflare credentials and run only on deploy; a failure stops the run.
+Missing declared Worker secrets fail before resource preparation. Deployments
+are serialized without cancellation across the complete lifecycle.
+
 ### The `single` topology
 
 For Workers that have no wrangler `env` block and no second environment to

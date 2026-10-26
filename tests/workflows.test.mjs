@@ -44,7 +44,11 @@ test("every direct job runs on an approved Ubicloud runner", () => {
     for (const [jobName, job] of Object.entries(workflow.jobs)) {
       if (job.uses) continue;
       assert.ok(
-        approvedRunners.has(job["runs-on"]),
+        approvedRunners.has(job["runs-on"]) ||
+          (name === "cloudflare-version.yml" &&
+            jobName === "version" &&
+            job["runs-on"] ===
+              "${{ fromJSON(inputs.deployment-policy).containers && 'ubicloud-standard-8' || 'ubicloud-standard-4' }}"),
         `${name}:${jobName} must use an approved Ubicloud runner`,
       );
     }
@@ -980,16 +984,24 @@ test("D1 migrations run on deploy only and render from policy", (t) => {
     path.join(os.tmpdir(), "d1-migrations-"),
   );
   t.after(() => fs.rmSync(outputDirectory, { recursive: true }));
-  for (const [index, [envFlag, expected]] of [
+  for (const [index, [envFlag, configFlag, expected]] of [
     [
+      "",
       "",
       "d1 migrations apply DEVTOOL_DB --remote\n" +
         "d1 migrations apply provider-db --remote\n",
     ],
     [
       "--env mainnet",
+      "",
       "d1 migrations apply DEVTOOL_DB --remote --env mainnet\n" +
         "d1 migrations apply provider-db --remote --env mainnet\n",
+    ],
+    [
+      "--env live-v2",
+      "--config .wrangler.live-v2.generated.jsonc",
+      "d1 migrations apply DEVTOOL_DB --remote --env live-v2 --config .wrangler.live-v2.generated.jsonc\n" +
+        "d1 migrations apply provider-db --remote --env live-v2 --config .wrangler.live-v2.generated.jsonc\n",
     ],
   ].entries()) {
     const outputFile = path.join(outputDirectory, `case-${index}`);
@@ -1000,6 +1012,7 @@ test("D1 migrations run on deploy only and render from policy", (t) => {
         GITHUB_OUTPUT: outputFile,
         DATABASES: JSON.stringify(["DEVTOOL_DB", "provider-db"]),
         ENV_FLAG: envFlag,
+        CONFIG_FLAG: configFlag,
       },
     });
     assert.equal(result.status, 0, `${envFlag}: ${result.stderr}`);
@@ -1201,5 +1214,50 @@ test("npm changesets guard rejects real credentials, allows the placeholder", (t
       env,
     });
     assert.equal(result.status, expected, `${label}: ${result.stderr}`);
+  }
+});
+
+test("Cloudflare lifecycle commands preserve deployment boundaries and ordering", () => {
+  const workflow = parse(
+    fs.readFileSync(`${directory}/cloudflare-version.yml`, "utf8"),
+  );
+  const job = workflow.jobs.version;
+  assert.equal(job.concurrency["cancel-in-progress"], false);
+  const steps = job.steps;
+  const prepare = steps.find(
+    (step) => step.name === "Prepare target configuration",
+  );
+  assert.match(prepare.env.GITHUB_ENVIRONMENT_VARIABLES_JSON, /toJSON\(vars\)/);
+  assert.equal(prepare.env.CLOUDFLARE_API_TOKEN, undefined);
+  const before = steps.find(
+    (step) => step.name === "Prepare deployment resources",
+  );
+  const after = steps.find((step) => step.name === "Verify deployment");
+  for (const hook of [before, after]) {
+    assert.match(hook.if, /inputs.operation == 'deploy'/);
+    assert.match(hook.env.CLOUDFLARE_API_TOKEN, /secrets/);
+    assert.match(hook["working-directory"], /deployment-policy/);
+  }
+  const index = (name) => steps.findIndex((step) => step.name === name);
+  assert.ok(index("Prepare target configuration") < index("Build"));
+  assert.ok(
+    index("Collect Worker secrets") < index("Prepare deployment resources"),
+  );
+  assert.ok(
+    index("Prepare deployment resources") < index("Apply D1 migrations"),
+  );
+  assert.ok(
+    index("Apply D1 migrations") < index("Upload or deploy Worker version"),
+  );
+  assert.ok(
+    index("Upload or deploy Worker version") < index("Verify deployment"),
+  );
+  for (const step of steps.filter((step) =>
+    ["Plan D1 migrations", "Upload or deploy Worker version"].includes(
+      step.name,
+    ),
+  )) {
+    assert.match(JSON.stringify(step), /wranglerConfig/);
+    assert.match(JSON.stringify(step), /--config/);
   }
 });

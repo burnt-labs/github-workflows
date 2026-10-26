@@ -1128,6 +1128,11 @@ function validateDeploymentPolicy(policy) {
   }
   requireString(policy.workingDirectory, "deployment workingDirectory");
   requireString(policy.versionFile, "deployment versionFile");
+  if (policy.containers === void 0) {
+    policy.containers = false;
+  } else if (typeof policy.containers !== "boolean") {
+    throw new Error("deployment containers must be a boolean");
+  }
   if (policy.releasePrefix === void 0) {
     policy.releasePrefix = "";
   } else if (
@@ -1220,15 +1225,44 @@ function validateDeploymentPolicy(policy) {
         target.wranglerEnv,
         `deployment targets.${role}.wranglerEnv`,
       );
-      if (target.wranglerEnv !== expected[role]) {
+      if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(target.wranglerEnv)) {
         throw new Error(
-          `${policy.topology} topology requires targets.${role}.wranglerEnv=${expected[role]}`,
+          `targets.${role}.wranglerEnv must be a lowercase letters-and-numbers slug`,
         );
       }
-      if (target.githubEnvironment !== target.wranglerEnv) {
+      if (target.githubEnvironment !== expected[role]) {
         throw new Error(
-          `targets.${role}.githubEnvironment must equal wranglerEnv`,
+          `${policy.topology} topology requires targets.${role}.githubEnvironment=${expected[role]}`,
         );
+      }
+    }
+    if (target.wranglerConfig !== void 0) {
+      requireString(target.wranglerConfig, `targets.${role}.wranglerConfig`);
+      if (
+        !/^[A-Za-z0-9_.\/-]+\.jsonc?$/.test(target.wranglerConfig) ||
+        path.isAbsolute(target.wranglerConfig) ||
+        target.wranglerConfig.split("/").includes("..")
+      ) {
+        throw new Error(
+          `targets.${role}.wranglerConfig must be a relative JSON/JSONC path without parent traversal`,
+        );
+      }
+    }
+    if (target.commands !== void 0) {
+      if (
+        !target.commands ||
+        typeof target.commands !== "object" ||
+        Array.isArray(target.commands)
+      ) {
+        throw new Error(`targets.${role}.commands must be an object`);
+      }
+      for (const [name, command] of Object.entries(target.commands)) {
+        if (!["prepare", "beforeDeploy", "afterDeploy"].includes(name)) {
+          throw new Error(
+            `targets.${role}.commands has unknown lifecycle command ${name}`,
+          );
+        }
+        requireString(command, `targets.${role}.commands.${name}`);
       }
     }
     if (
@@ -1237,6 +1271,14 @@ function validateDeploymentPolicy(policy) {
     ) {
       throw new Error("preview-specific GitHub Environments are forbidden");
     }
+  }
+  if (
+    !single &&
+    policy.targets.candidate.wranglerEnv === policy.targets.release.wranglerEnv
+  ) {
+    throw new Error(
+      "candidate and release must use distinct Wrangler environments",
+    );
   }
   if (single && policy.targets.candidate.url !== policy.targets.release.url) {
     throw new Error(
