@@ -1177,6 +1177,74 @@ function validateDeploymentPolicy(policy) {
       }
     }
   }
+  if (policy.environmentSecret === void 0) policy.environmentSecret = "";
+  if (
+    typeof policy.environmentSecret !== "string" ||
+    (policy.environmentSecret !== "" &&
+      !/^[A-Z][A-Z0-9_]*$/.test(policy.environmentSecret))
+  )
+    throw new Error(
+      "deployment environmentSecret must be an uppercase secret name",
+    );
+  if (policy.workerVariables === void 0) policy.workerVariables = [];
+  if (!Array.isArray(policy.workerVariables))
+    throw new Error("deployment workerVariables must be an array");
+  const variables = /* @__PURE__ */ new Set();
+  for (const name of policy.workerVariables) {
+    requireString(name, "deployment workerVariables entry");
+    if (!/^[A-Z][A-Z0-9_]*$/.test(name))
+      throw new Error(
+        "deployment workerVariables entries must be uppercase environment-variable names",
+      );
+    if (variables.has(name))
+      throw new Error(`deployment workerVariables lists ${name} twice`);
+    if (policy.workerSecrets.includes(name))
+      throw new Error(`deployment variable and secret names overlap: ${name}`);
+    variables.add(name);
+  }
+  const controlNames = /* @__PURE__ */ new Set([
+    "BURNT_CLOUDFLARE_API_TOKEN",
+    "BURNT_CLOUDFLARE_ACCOUNT_ID",
+    "CLOUDFLARE_API_TOKEN",
+    "CLOUDFLARE_ACCOUNT_ID",
+    "CLOUDFLARE_API_KEY",
+    "GITHUB_TOKEN",
+    "GH_TOKEN",
+    "GH_VARIABLES_TOKEN",
+    "BURNT_PAT_GITHUB_ACTIONS_TOKEN",
+    "PHALA_CLOUD_API_KEY",
+    "BURNT_PROD_PHALA_API_KEY",
+    "GHCR_READ_TOKEN",
+    "DSTACK_DOCKER_REGISTRY",
+    "DSTACK_DOCKER_USERNAME",
+    "DSTACK_DOCKER_PASSWORD",
+    "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+    "ACTIONS_RUNTIME_TOKEN",
+  ]);
+  if (policy.environmentSecret) {
+    for (const name of [
+      ...policy.workerVariables,
+      ...policy.workerSecrets,
+      policy.environmentSecret,
+    ]) {
+      if (controlNames.has(name))
+        throw new Error(
+          "deployment runtime configuration must not name a control credential",
+        );
+    }
+  }
+  if (!policy.environmentSecret && policy.workerVariables.length)
+    throw new Error("deployment workerVariables requires environmentSecret");
+  if (
+    policy.environmentSecret &&
+    [...policy.workerVariables, ...policy.workerSecrets].includes(
+      policy.environmentSecret,
+    )
+  ) {
+    throw new Error(
+      "deployment environmentSecret must not also be runtime configuration",
+    );
+  }
   if (policy.d1Migrations === void 0) {
     policy.d1Migrations = [];
   } else if (!Array.isArray(policy.d1Migrations)) {
@@ -1235,6 +1303,11 @@ function validateDeploymentPolicy(policy) {
           `${policy.topology} topology requires targets.${role}.githubEnvironment=${expected[role]}`,
         );
       }
+    }
+    if (policy.environmentSecret && target.wranglerConfig === void 0) {
+      throw new Error(
+        `environmentSecret requires targets.${role}.wranglerConfig`,
+      );
     }
     if (target.wranglerConfig !== void 0) {
       requireString(target.wranglerConfig, `targets.${role}.wranglerConfig`);

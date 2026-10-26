@@ -158,6 +158,8 @@ test("deployment accepts the topology environments", () => {
       previewReleaseOnMain: true,
       releasePrefix: "",
       workerSecrets: [],
+      workerVariables: [],
+      environmentSecret: "",
       d1Migrations: [],
       containers: false,
     });
@@ -677,4 +679,86 @@ test("deployment validates container capacity, generated config and lifecycle co
     invalid.targets.candidate.commands = commands;
     assert.throws(() => validateDeploymentPolicy(invalid), /commands/);
   }
+});
+
+test("environment bundles require exact distinct runtime names and generated configs", () => {
+  const bundlePolicy = () => {
+    const policy = deploymentPolicy();
+    policy.environmentSecret = "SERVICE_ENV_JSON";
+    policy.workerVariables = ["API_URL", "OPTIONAL_VALUE"];
+    policy.workerSecrets = ["SERVICE_TOKEN"];
+    for (const target of Object.values(policy.targets))
+      target.wranglerConfig = ".wrangler.generated.jsonc";
+    return policy;
+  };
+  assert.deepEqual(validateDeploymentPolicy(bundlePolicy()).workerVariables, [
+    "API_URL",
+    "OPTIONAL_VALUE",
+  ]);
+  for (const change of [
+    (p) => {
+      p.environmentSecret = "bad-name";
+    },
+    (p) => {
+      p.environmentSecret = 42;
+    },
+    (p) => {
+      p.workerVariables = "API_URL";
+    },
+    (p) => {
+      p.workerVariables = ["API_URL", "API_URL"];
+    },
+    (p) => {
+      p.workerVariables = ["lowercase"];
+    },
+    (p) => {
+      p.workerVariables = ["SERVICE_TOKEN"];
+    },
+    (p) => {
+      p.workerSecrets.push("SERVICE_ENV_JSON");
+    },
+    (p) => {
+      delete p.targets.candidate.wranglerConfig;
+    },
+    (p) => {
+      delete p.environmentSecret;
+    },
+  ]) {
+    const policy = bundlePolicy();
+    change(policy);
+    assert.throws(() => validateDeploymentPolicy(policy));
+  }
+  for (const name of [
+    "GITHUB_TOKEN",
+    "GH_TOKEN",
+    "CLOUDFLARE_API_KEY",
+    "PHALA_CLOUD_API_KEY",
+    "BURNT_PROD_PHALA_API_KEY",
+    "GHCR_READ_TOKEN",
+    "DSTACK_DOCKER_PASSWORD",
+    "GH_VARIABLES_TOKEN",
+  ]) {
+    for (const field of [
+      "workerVariables",
+      "workerSecrets",
+      "environmentSecret",
+    ]) {
+      const policy = bundlePolicy();
+      policy[field] = field === "environmentSecret" ? name : [name];
+      assert.throws(() => validateDeploymentPolicy(policy));
+    }
+  }
+});
+
+test("individual Worker secret policies retain their existing allowed names", () => {
+  const policy = deploymentPolicy();
+  policy.workerSecrets = ["PHALA_CLOUD_API_KEY", "GHCR_READ_TOKEN", "GH_TOKEN"];
+  assert.deepEqual(
+    validateDeploymentPolicy(policy).workerSecrets,
+    policy.workerSecrets,
+  );
+  policy.environmentSecret = "SERVICE_ENV_JSON";
+  for (const target of Object.values(policy.targets))
+    target.wranglerConfig = ".wrangler.generated.jsonc";
+  assert.throws(() => validateDeploymentPolicy(policy), /control credential/);
 });

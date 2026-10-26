@@ -537,6 +537,26 @@ secrets, because inherited secrets arrive under their own names. Both forms
 work: `cloudflare-version.yml` resolves `cloudflare-api-token` first and falls
 back to `BURNT_CLOUDFLARE_API_TOKEN`, and fails loudly if neither is present.
 
+### Service environment bundles
+
+A Cloudflare policy may select `environmentSecret`, naming a GitHub Environment
+secret containing exactly `{vars,secrets}`. `workerVariables` and `workerSecrets`
+are exact required allowlists; public values must be strings (empty is allowed),
+secrets nonempty strings. No unknown names, control credentials, overlap,
+coercion or alternate source is accepted. This is Cue's established service
+bundle shape, with centrally owned validation/materialization rather than
+consumer-owned credential handling.
+
+The central `env-json.bundle.mjs` validates before application prepare/build and
+writes only public vars to `targets[role].wranglerConfig`, beside the source
+`wrangler.jsonc`. It replaces only the selected environment vars and preserves
+all resource/DO identities and relative paths. Create the generated file exclusively; refuse any existing destination and
+path/symlink escapes. Secrets are validated on previews too, but materialized
+only after a successful build for deploy, in a mode `0600` temporary file read
+by the pinned action. Always clean up, including failure. Do not pass entire
+GitHub configuration contexts or service bundle contents to consumer commands.
+`pnpm build` regenerates both policy and environment materializer bundles.
+
 ### D1 migrations
 
 Repositories with a D1 database otherwise end up with a hand-rolled migration

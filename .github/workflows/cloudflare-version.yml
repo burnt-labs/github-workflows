@@ -115,6 +115,22 @@ jobs:
           fi
       - name: Install
         run: ${{ fromJSON(inputs.quality-policy).commands.install }}
+      - name: Checkout central environment tools
+        if: fromJSON(inputs.deployment-policy).environmentSecret != ''
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: burnt-labs/github-workflows
+          ref: 2fe80e1f163deec5ea88dad040b7eb71c35adc68 # unreleased
+          path: .burnt-workflows
+          persist-credentials: false
+      - name: Materialize public Worker variables
+        if: fromJSON(inputs.deployment-policy).environmentSecret != ''
+        working-directory: ${{ github.workspace }}
+        env:
+          DEPLOYMENT_POLICY: ${{ inputs.deployment-policy }}
+          TARGET: ${{ inputs.target }}
+          ENVIRONMENT_JSON: ${{ secrets[fromJSON(inputs.deployment-policy).environmentSecret] }}
+        run: node .burnt-workflows/scripts/env-json.bundle.mjs prepare
       - name: Prepare target configuration
         if: fromJSON(inputs.deployment-policy).targets[inputs.target].commands.prepare != null
         working-directory: ${{ fromJSON(inputs.deployment-policy).workingDirectory }}
@@ -125,7 +141,8 @@ jobs:
         id: worker-secrets
         if: >-
           inputs.operation == 'deploy' &&
-          fromJSON(inputs.deployment-policy).workerSecrets[0] != null
+          fromJSON(inputs.deployment-policy).workerSecrets[0] != null &&
+          fromJSON(inputs.deployment-policy).environmentSecret == ''
         env:
           # Everything the caller inherited, the Cloudflare token included, so
           # the allowlist below is the whole safety property. The validator also
@@ -142,6 +159,19 @@ jobs:
           jq -n --argjson all "$ALL_SECRETS" --argjson want "$WANTED" \
             '$want | map({key: ., value: $all[.]}) | from_entries' > "$RUNNER_TEMP/worker-secrets.json"
           echo "Publishing $(jq -r 'keys | join(", ")' "$RUNNER_TEMP/worker-secrets.json")"
+      - name: Materialize bundled Worker secrets
+        id: bundle-secrets
+        if: >-
+          inputs.operation == 'deploy' &&
+          fromJSON(inputs.deployment-policy).environmentSecret != '' &&
+          fromJSON(inputs.deployment-policy).workerSecrets[0] != null
+        working-directory: ${{ github.workspace }}
+        env:
+          DEPLOYMENT_POLICY: ${{ inputs.deployment-policy }}
+          TARGET: ${{ inputs.target }}
+          OPERATION: ${{ inputs.operation }}
+          ENVIRONMENT_JSON: ${{ secrets[fromJSON(inputs.deployment-policy).environmentSecret] }}
+        run: node .burnt-workflows/scripts/env-json.bundle.mjs secrets
       # D1 migrations declared in the deployment policy apply here, before the
       # new version deploys, so the schema the code was written against exists
       # by the time that code serves. Deploy only, never preview — the same
@@ -231,9 +261,10 @@ jobs:
             ${{ fromJSON(inputs.deployment-policy).targets[inputs.target].wranglerConfig != null && format('--config {0}', fromJSON(inputs.deployment-policy).targets[inputs.target].wranglerConfig) || '' }}
             --message=${{ inputs.version-tag }}
             --tag "${{ inputs.version-tag }}"
-            ${{ steps.worker-secrets.outcome == 'success' && format('--secrets-file {0}/worker-secrets.json', runner.temp) || '' }}
+            ${{ (steps.worker-secrets.outcome == 'success' || steps.bundle-secrets.outcome == 'success') && format('--secrets-file {0}/worker-secrets.json', runner.temp) || '' }}
       - name: Remove Worker secrets file
-        if: always() && steps.worker-secrets.outcome == 'success'
+        if: always()
+        working-directory: ${{ github.workspace }}
         run: rm -f "$RUNNER_TEMP/worker-secrets.json"
       - name: Verify deployment
         if: inputs.operation == 'deploy' && fromJSON(inputs.deployment-policy).targets[inputs.target].commands.afterDeploy != null
