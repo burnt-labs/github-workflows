@@ -102,10 +102,9 @@ name an existing service environment such as `staging-v2` or `live-v2`; the two
 roles must remain distinct. Set `containers: true` for a container build runner.
 
 Targets may set a relative `wranglerConfig` path and `commands.prepare`,
-`commands.afterDeploy`. Preparation receives the
-selected Actions variables as `GITHUB_ENVIRONMENT_VARIABLES_JSON` and runs
-before build for both preview and deploy. Use it to validate a single public
-configuration document and generate JSONC. The generated config is used for
+`commands.afterDeploy`. Preparation runs before build for both preview and
+deploy, to validate generated public configuration and add application build
+metadata. The generated config is used for
 both migrations and the Worker. Verification runs only after deploy. Consumer
 commands receive no Cloudflare credentials; a failure stops the run. Deployments
 are serialized without cancellation. Main promotion requires the default branch.

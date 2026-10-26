@@ -1246,8 +1246,7 @@ test("Cloudflare lifecycle commands preserve deployment boundaries and ordering"
   const prepare = steps.find(
     (step) => step.name === "Prepare target configuration",
   );
-  assert.match(prepare.env.GITHUB_ENVIRONMENT_VARIABLES_JSON, /toJSON\(vars\)/);
-  assert.equal(prepare.env.CLOUDFLARE_API_TOKEN, undefined);
+  assert.equal(prepare.env, undefined);
   const after = steps.find((step) => step.name === "Verify deployment");
   assert.match(after.if, /inputs.operation == 'deploy'/);
   assert.equal(after.env, undefined);

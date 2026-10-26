@@ -311,9 +311,8 @@ entrypoint, Docker and migrations paths without changing tracked source.
 
 Targets may declare `commands.prepare` and `commands.afterDeploy`.
 Preparation runs after install and before build for both uploads and deployments.
-It receives `GITHUB_ENVIRONMENT_VARIABLES_JSON`, the selected environment's
-nonsecret Actions variables, and must validate any configuration document it
-consumes. Do not print that snapshot. Verification runs only after deploy.
+Use it to validate generated nonsecret configuration and add application
+build metadata. Verification runs only after deploy.
 Both commands run from the deployment working directory with no Cloudflare
 credentials. Missing declared Worker secrets fail before deployment.
 

@@ -118,8 +118,6 @@ jobs:
       - name: Prepare target configuration
         if: fromJSON(inputs.deployment-policy).targets[inputs.target].commands.prepare != null
         working-directory: ${{ fromJSON(inputs.deployment-policy).workingDirectory }}
-        env:
-          GITHUB_ENVIRONMENT_VARIABLES_JSON: ${{ toJSON(vars) }}
         run: ${{ fromJSON(inputs.deployment-policy).targets[inputs.target].commands.prepare }}
       - name: Build
         run: ${{ fromJSON(inputs.quality-policy).commands.build }}
