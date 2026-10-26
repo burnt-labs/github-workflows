@@ -201,6 +201,94 @@ export function validateDeploymentPolicy(policy) {
     }
   }
 
+  // A service bundle reuses Cue's {vars,secrets} GitHub Environment secret.
+  // It is an explicit source choice: never merge it with individual keys.
+  if (policy.environmentSecret === undefined) policy.environmentSecret = "";
+  if (
+    typeof policy.environmentSecret !== "string" ||
+    (policy.environmentSecret !== "" &&
+      !/^[A-Z][A-Z0-9_]*$/.test(policy.environmentSecret))
+  )
+    throw new Error(
+      "deployment environmentSecret must be an uppercase secret name",
+    );
+  if (policy.workerVariables === undefined) policy.workerVariables = [];
+  if (!Array.isArray(policy.workerVariables))
+    throw new Error("deployment workerVariables must be an array");
+  const variables = new Set();
+  for (const name of policy.workerVariables) {
+    requireString(name, "deployment workerVariables entry");
+    if (!/^[A-Z][A-Z0-9_]*$/.test(name))
+      throw new Error(
+        "deployment workerVariables entries must be uppercase environment-variable names",
+      );
+    if (variables.has(name))
+      throw new Error(`deployment workerVariables lists ${name} twice`);
+    if (policy.workerSecrets.includes(name))
+      throw new Error(`deployment variable and secret names overlap: ${name}`);
+    variables.add(name);
+  }
+  const controlNames = new Set([
+    "BURNT_CLOUDFLARE_API_TOKEN",
+    "BURNT_CLOUDFLARE_ACCOUNT_ID",
+    "CLOUDFLARE_API_TOKEN",
+    "CLOUDFLARE_ACCOUNT_ID",
+    "CLOUDFLARE_API_KEY",
+    "GITHUB_TOKEN",
+    "GH_TOKEN",
+    "GH_VARIABLES_TOKEN",
+    "BURNT_PAT_GITHUB_ACTIONS_TOKEN",
+    "PHALA_CLOUD_API_KEY",
+    "BURNT_PROD_PHALA_API_KEY",
+    "GHCR_READ_TOKEN",
+    "DSTACK_DOCKER_REGISTRY",
+    "DSTACK_DOCKER_USERNAME",
+    "DSTACK_DOCKER_PASSWORD",
+    "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+    "ACTIONS_RUNTIME_TOKEN",
+  ]);
+  if (policy.environmentSecret) {
+    for (const name of [
+      ...policy.workerVariables,
+      ...policy.workerSecrets,
+      policy.environmentSecret,
+    ]) {
+      if (controlNames.has(name))
+        throw new Error(
+          "deployment runtime configuration must not name a control credential",
+        );
+    }
+  }
+  if (!policy.environmentSecret && policy.workerVariables.length)
+    throw new Error("deployment workerVariables requires environmentSecret");
+  if (
+    policy.environmentSecret &&
+    [...policy.workerVariables, ...policy.workerSecrets].includes(
+      policy.environmentSecret,
+    )
+  ) {
+    throw new Error(
+      "deployment environmentSecret must not also be runtime configuration",
+    );
+  }
+
+  // Authenticated acceptance checks receive only an explicitly declared subset.
+  if (policy.verificationSecrets === undefined) policy.verificationSecrets = [];
+  if (!Array.isArray(policy.verificationSecrets))
+    throw new Error("deployment verificationSecrets must be an array");
+  if (policy.verificationSecrets.length && !policy.environmentSecret)
+    throw new Error("verificationSecrets requires environmentSecret");
+  const verification = new Set();
+  for (const name of policy.verificationSecrets) {
+    if (!policy.workerSecrets.includes(name) || controlNames.has(name))
+      throw new Error(
+        "verificationSecrets must contain only declared runtime workerSecrets",
+      );
+    if (verification.has(name))
+      throw new Error("verificationSecrets must not contain duplicates");
+    verification.add(name);
+  }
+
   // D1 databases whose migrations apply before each deploy, by binding or
   // database name — whichever `wrangler d1 migrations apply` should receive.
   // In policy for the same reason workerSecrets is: the alternative is every
@@ -285,6 +373,16 @@ export function validateDeploymentPolicy(policy) {
       }
     }
 
+    if (policy.verificationSecrets.length && !target.commands?.afterDeploy) {
+      throw new Error(
+        `verificationSecrets requires targets.${role}.commands.afterDeploy`,
+      );
+    }
+    if (policy.environmentSecret && target.wranglerConfig === undefined) {
+      throw new Error(
+        `environmentSecret requires targets.${role}.wranglerConfig`,
+      );
+    }
     if (target.wranglerConfig !== undefined) {
       requireString(target.wranglerConfig, `targets.${role}.wranglerConfig`);
       if (

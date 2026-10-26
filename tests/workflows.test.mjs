@@ -598,7 +598,7 @@ test("Worker secrets ride on the pinned deploy, not a separate secret edit", () 
   );
   assert.match(
     deploy.with.command,
-    /steps\.worker-secrets\.outcome == 'success' && format\('--secrets-file /,
+    /steps\.worker-secrets\.outcome == 'success' \|\| steps\.bundle-secrets\.outcome == 'success'/,
   );
   assert.doesNotMatch(deploy.with.command, /&& ''/);
   const source = fs.readFileSync(`${directory}/cloudflare-version.yml`, "utf8");
@@ -1307,4 +1307,80 @@ test("main promotion rejects feature branch dispatches before quality or deploy"
     });
     assert.equal(result.status, status);
   }
+});
+
+test("Cloudflare bundles validate before build and never expose secrets to consumer commands", () => {
+  const workflow = parse(
+    fs.readFileSync(`${directory}/cloudflare-version.yml`, "utf8"),
+  );
+  const steps = workflow.jobs.version.steps;
+  const index = (name) => steps.findIndex((step) => step.name === name);
+  const publicStep = steps[index("Materialize public Worker variables")];
+  const secrets = steps[index("Materialize bundled Worker secrets")];
+  assert.ok(index("Install") < index("Materialize public Worker variables"));
+  assert.ok(
+    index("Materialize public Worker variables") <
+      index("Prepare target configuration"),
+  );
+  assert.ok(index("Build") < index("Materialize bundled Worker secrets"));
+  assert.match(
+    publicStep.env.ENVIRONMENT_JSON,
+    /secrets\[fromJSON\(inputs.deployment-policy\).environmentSecret\]/,
+  );
+  assert.equal(
+    publicStep.if,
+    "fromJSON(inputs.deployment-policy).environmentSecret != ''",
+  );
+  assert.match(secrets.if, /inputs.operation == 'deploy'/);
+  assert.match(
+    steps.find((step) => step.id === "worker-secrets").if,
+    /environmentSecret == ''/,
+  );
+  assert.equal(steps[index("Prepare target configuration")].env, undefined);
+  assert.equal(steps[index("Build")].env, undefined);
+  assert.equal(steps[index("Verify deployment")].env, undefined);
+  const cleanup = steps[index("Remove Worker secrets file")];
+  assert.equal(cleanup.if, "always()");
+  assert.equal(cleanup["working-directory"], "${{ github.workspace }}");
+  assert.ok(
+    index("Materialize bundled Worker secrets") <
+      index("Upload or deploy Worker version"),
+  );
+  const checkout = steps[index("Checkout central environment tools")];
+  assert.match(checkout.with.ref, /^[0-9a-f]{40}$/);
+  assert.equal(checkout.with["persist-credentials"], false);
+});
+
+test("authenticated probes receive only a late scoped file and always remove it", () => {
+  const workflow = parse(
+    fs.readFileSync(`${directory}/cloudflare-version.yml`, "utf8"),
+  );
+  const steps = workflow.jobs.version.steps;
+  const index = (name) => steps.findIndex((step) => step.name === name);
+  const collect = steps[index("Collect verification secrets")];
+  assert.ok(
+    index("Upload or deploy Worker version") <
+      index("Collect verification secrets"),
+  );
+  assert.ok(
+    index("Remove Worker secrets file") < index("Collect verification secrets"),
+  );
+  assert.match(collect.if, /inputs.operation == 'deploy'/);
+  assert.match(collect.if, /steps.wrangler.outcome == 'success'/);
+  assert.match(collect.if, /verificationSecrets\[0\] != null/);
+  const probe = steps[index("Verify deployment with scoped secrets")];
+  assert.deepEqual(Object.keys(probe.env), [
+    "WORKER_VERIFICATION_SECRETS_FILE",
+  ]);
+  assert.match(probe.if, /verification-secrets.outcome == 'success'/);
+  assert.match(
+    steps[index("Verify deployment")].if,
+    /verificationSecrets\[0\] == null/,
+  );
+  const cleanup = steps[index("Remove verification secrets file")];
+  assert.equal(cleanup.if, "always()");
+  assert.ok(
+    index("Verify deployment with scoped secrets") <
+      index("Remove verification secrets file"),
+  );
 });

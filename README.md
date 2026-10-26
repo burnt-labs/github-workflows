@@ -111,6 +111,85 @@ are serialized without cancellation. Main promotion requires the default branch.
 Release prefixes route unrelated release namespaces away from deployment; malformed
 tags within the configured namespace still fail.
 
+### Service environment bundles
+
+Cloudflare deployments can reuse the service bundle shape established by
+[Cue](https://github.com/burnt-labs/cue-app/blob/14bd564aceb6ec475d2e76218878762231a46adb/.agents/knowledge/github-env-json.md).
+Store one JSON document as a **GitHub Environment secret** in each real target
+environment. Runtime configuration and deployment credentials stay separate.
+
+```jsonc
+// Deployment policy. Names are declarations; no runtime values belong here.
+{
+  "environmentSecret": "SERVICE_ENV_JSON",
+  "workerVariables": ["API_URL", "OPTIONAL_PUBLIC_VALUE"],
+  "workerSecrets": ["SERVICE_TOKEN"],
+  "targets": {
+    "candidate": {
+      // Other required target fields omitted here.
+      "wranglerConfig": ".wrangler.staging.generated.jsonc",
+    },
+    "release": {
+      "wranglerConfig": ".wrangler.production.generated.jsonc",
+    },
+  },
+}
+```
+
+The named secret has exactly this shape, with every declared key present:
+
+```json
+{
+  "vars": { "API_URL": "https://api.example.com", "OPTIONAL_PUBLIC_VALUE": "" },
+  "secrets": { "SERVICE_TOKEN": "example-only" }
+}
+```
+
+Values must be strings; secrets must be nonempty. Empty public values are allowed
+so the application can validate their meaning. Unknown keys, missing names,
+variable/secret overlap, control credentials and invalid JSON fail the run.
+There is no merge with individual GitHub variables/secrets or checked-in vars.
+Consumers pass `secrets: inherit`; the shared workflow selects only
+`environmentSecret`, never passes the full context to application commands.
+Without `environmentSecret`, the existing individual `workerSecrets` contract
+continues to apply. `workerVariables` requires a bundle.
+
+Both preview and deployment validate the complete bundle before application
+preparation/build. The central materializer reads the sibling `wrangler.jsonc`
+and writes the target's `wranglerConfig`, replacing only the selected
+`env.<wranglerEnv>.vars` (top-level `vars` for `single`). The generated file must
+stay beside the source file inside the repository. The generated output must not already exist; source overwrite, traversal
+and symlink paths are rejected. All other environments, bindings, Durable Object
+classes/migrations, container image/build paths and configuration stay intact.
+Keep generated files ignored by Git. Application preparation reads the generated
+public config; it receives no runtime secret bundle or deployment credentials.
+
+Secret values are not written to disk until the build succeeds. On deploy only,
+the central helper creates a mode `0600` secrets file for the pinned Wrangler
+action's `--secrets-file`. Cleanup runs even on failure. Previews validate secret
+presence but never materialize or upload secrets. Errors never echo bundle JSON
+or values. A bundle does not rotate or revoke existing Worker secrets implicitly.
+
+Authenticated acceptance probes can declare `verificationSecrets`, an optional
+subset of `workerSecrets`, when using a bundle. Each target must then declare
+`commands.afterDeploy`. After a successful deploy, the platform creates a separate
+mode `0600` file containing only that subset and provides its path as
+`WORKER_VERIFICATION_SECRETS_FILE` to the probe. The complete bundle and deployment
+credentials are never passed to the probe. The original deployment secrets file
+has already been removed. Probe-file cleanup runs even if the probe fails.
+Previews never create the file or run the probe. With no subset declared, the
+existing unprivileged `afterDeploy` command remains unchanged. For example,
+`verificationSecrets: ["METRICS_TOKEN"]` preserves an authenticated metrics check
+without handing the probe unrelated runtime credentials.
+
+Cue's `sync-github-env-json.mjs` documents the existing 1Password `DevOps`
+service/environment item process; synchronize the named GitHub Environment secret
+through that operator process without printing values. The workflow never reads
+1Password directly. Central Phala's
+[TeeLS adoption](https://github.com/burnt-labs/teels-internal/blob/b513ce53109a67f9eeb6b8852aac26ccd6bd6d1b/.github/phala-policy.jsonc)
+continues to declare per-key runtime allowlists; this Cloudflare extension does
+not change Phala's contract or deploy any existing service.
+
 ### The `single` topology
 
 For Workers that have no wrangler `env` block and no second environment to
