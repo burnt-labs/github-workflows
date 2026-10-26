@@ -26,8 +26,22 @@ permissions:
   contents: read
 
 jobs:
+  validate:
+    name: Validate deployment ref
+    runs-on: ubicloud-standard-2
+    steps:
+      - env:
+          SOURCE_REF: ${{ github.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if [ "$SOURCE_REF" != "refs/heads/$DEFAULT_BRANCH" ]; then
+            echo "::error::Main promotion requires the repository default branch"
+            exit 1
+          fi
+
   quality:
-    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@d3096758fcd3e5bbc5a9622b8f1f5182b80aab86 # v1.7.0
+    needs: validate
+    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@711dbeedf8c330acafbf953735cbb17d2e59ea2f # unreleased
     with:
       quality-policy-path: ${{ inputs.quality-policy-path }}
       deployment-policy-path: ${{ inputs.deployment-policy-path }}
@@ -76,7 +90,7 @@ jobs:
     permissions:
       contents: read
       deployments: write
-    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@d3096758fcd3e5bbc5a9622b8f1f5182b80aab86 # v1.7.1
+    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@3c18cd6766e894d0ce49b45d5284a0650eefa29b # unreleased
     with:
       # Under single topology the candidate and the release are the same
       # Worker, so deploying here would serve the merge immediately and there
@@ -98,7 +112,7 @@ jobs:
     permissions:
       contents: read
       deployments: write
-    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@d3096758fcd3e5bbc5a9622b8f1f5182b80aab86 # v1.7.1
+    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@3c18cd6766e894d0ce49b45d5284a0650eefa29b # unreleased
     with:
       operation: preview
       target: release
@@ -184,7 +198,7 @@ jobs:
     permissions:
       contents: read
       deployments: write
-    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@d3096758fcd3e5bbc5a9622b8f1f5182b80aab86 # v1.7.1
+    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@3c18cd6766e894d0ce49b45d5284a0650eefa29b # unreleased
     with:
       operation: deploy
       target: release

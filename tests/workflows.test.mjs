@@ -44,21 +44,29 @@ test("every direct job runs on an approved Ubicloud runner", () => {
     for (const [jobName, job] of Object.entries(workflow.jobs)) {
       if (job.uses) continue;
       assert.ok(
-        approvedRunners.has(job["runs-on"]),
+        approvedRunners.has(job["runs-on"]) ||
+          (name === "cloudflare-version.yml" &&
+            jobName === "version" &&
+            job["runs-on"] ===
+              "${{ fromJSON(inputs.deployment-policy).containers && 'ubicloud-standard-8' || 'ubicloud-standard-4' }}"),
         `${name}:${jobName} must use an approved Ubicloud runner`,
       );
     }
   }
 });
 
-test("every internal workflow pin carries release metadata", () => {
+test("every internal workflow pin carries explicit release status", () => {
   for (const name of fs.readdirSync(directory)) {
     if (!name.endsWith(".yml")) continue;
     const source = fs.readFileSync(`${directory}/${name}`, "utf8");
     for (const [line] of source.matchAll(
       /^\s*(?:- )?uses: burnt-labs\/github-workflows\/.*$/gm,
     )) {
-      assert.match(line, /@[0-9a-f]{40} # v\d+\.\d+\.\d+$/, `${name}: ${line}`);
+      assert.match(
+        line,
+        /@[0-9a-f]{40} # (?:v\d+\.\d+\.\d+|unreleased)$/,
+        `${name}: ${line}`,
+      );
     }
   }
 });
@@ -678,7 +686,7 @@ test("release rejects an unrecognized operation instead of skipping", () => {
   assert.match(source, /operation must be preview or deploy/);
   assert.equal(
     workflow.jobs["preview-release"].if,
-    "inputs.operation == 'preview'",
+    "inputs.operation == 'preview' && needs.validate-release-tag.outputs.selected == 'true'",
   );
   assert.match(
     workflow.jobs["deploy-release"].if,
@@ -688,7 +696,7 @@ test("release rejects an unrecognized operation instead of skipping", () => {
   assert.deepEqual(workflow.jobs.quality.needs, "validate");
 });
 
-test("release rejects tags from another app namespace", () => {
+test("release routes namespaces and rejects malformed selected tags", () => {
   const workflow = parse(
     fs.readFileSync(`${directory}/cloudflare-release.yml`, "utf8"),
   );
@@ -702,7 +710,7 @@ test("release rejects tags from another app namespace", () => {
     ["screening-v1.2.3-rc.7", "true", 0],
     ["screening-v1.2.3-rc.7", "false", 1],
     ["screening-v1.2.3", "true", 1],
-    ["burnt-v1.2.3", "false", 1],
+    ["burnt-v1.2.3", "false", 0],
   ]) {
     const result = spawnSync(
       "bash",
@@ -711,6 +719,7 @@ test("release rejects tags from another app namespace", () => {
         env: {
           ...process.env,
           PRERELEASE: prerelease,
+          GITHUB_OUTPUT: "/dev/null",
           RELEASE_PREFIX: "screening",
           RELEASE_TAG: releaseTag,
         },
@@ -980,16 +989,24 @@ test("D1 migrations run on deploy only and render from policy", (t) => {
     path.join(os.tmpdir(), "d1-migrations-"),
   );
   t.after(() => fs.rmSync(outputDirectory, { recursive: true }));
-  for (const [index, [envFlag, expected]] of [
+  for (const [index, [envFlag, configFlag, expected]] of [
     [
+      "",
       "",
       "d1 migrations apply DEVTOOL_DB --remote\n" +
         "d1 migrations apply provider-db --remote\n",
     ],
     [
       "--env mainnet",
+      "",
       "d1 migrations apply DEVTOOL_DB --remote --env mainnet\n" +
         "d1 migrations apply provider-db --remote --env mainnet\n",
+    ],
+    [
+      "--env live-v2",
+      "--config .wrangler.live-v2.generated.jsonc",
+      "d1 migrations apply DEVTOOL_DB --remote --env live-v2 --config .wrangler.live-v2.generated.jsonc\n" +
+        "d1 migrations apply provider-db --remote --env live-v2 --config .wrangler.live-v2.generated.jsonc\n",
     ],
   ].entries()) {
     const outputFile = path.join(outputDirectory, `case-${index}`);
@@ -1000,6 +1017,7 @@ test("D1 migrations run on deploy only and render from policy", (t) => {
         GITHUB_OUTPUT: outputFile,
         DATABASES: JSON.stringify(["DEVTOOL_DB", "provider-db"]),
         ENV_FLAG: envFlag,
+        CONFIG_FLAG: configFlag,
       },
     });
     assert.equal(result.status, 0, `${envFlag}: ${result.stderr}`);
@@ -1201,5 +1219,92 @@ test("npm changesets guard rejects real credentials, allows the placeholder", (t
       env,
     });
     assert.equal(result.status, expected, `${label}: ${result.stderr}`);
+  }
+});
+
+test("Cloudflare lifecycle commands preserve deployment boundaries and ordering", () => {
+  const workflow = parse(
+    fs.readFileSync(`${directory}/cloudflare-version.yml`, "utf8"),
+  );
+  const job = workflow.jobs.version;
+  assert.match(
+    job.steps.find((step) => step.name === "Validate invocation").if,
+    /pull_request_target/,
+  );
+  for (const name of [
+    "cloudflare-main.yml",
+    "cloudflare-release.yml",
+    "cloudflare-pr.yml",
+  ]) {
+    const entry = parse(fs.readFileSync(`${directory}/${name}`, "utf8"));
+    assert.notEqual(entry.concurrency?.["cancel-in-progress"], true);
+    for (const call of Object.values(entry.jobs))
+      assert.notEqual(call.concurrency?.["cancel-in-progress"], true);
+  }
+  assert.equal(job.concurrency["cancel-in-progress"], false);
+  const steps = job.steps;
+  const prepare = steps.find(
+    (step) => step.name === "Prepare target configuration",
+  );
+  assert.equal(prepare.env, undefined);
+  const after = steps.find((step) => step.name === "Verify deployment");
+  assert.match(after.if, /inputs.operation == 'deploy'/);
+  assert.equal(after.env, undefined);
+  assert.match(after["working-directory"], /deployment-policy/);
+  assert.equal(
+    steps.find((step) => step.name === "Prepare deployment resources"),
+    undefined,
+  );
+  const index = (name) => steps.findIndex((step) => step.name === name);
+  assert.ok(index("Prepare target configuration") < index("Build"));
+  assert.ok(
+    index("Apply D1 migrations") < index("Upload or deploy Worker version"),
+  );
+  assert.ok(
+    index("Upload or deploy Worker version") < index("Verify deployment"),
+  );
+  for (const step of steps.filter((step) =>
+    ["Plan D1 migrations", "Upload or deploy Worker version"].includes(
+      step.name,
+    ),
+  )) {
+    assert.match(JSON.stringify(step), /wranglerConfig/);
+    assert.match(JSON.stringify(step), /--config/);
+  }
+});
+
+test("pre-checkout guards work with nested policies on an empty workspace", (t) => {
+  const workflow = parse(
+    fs.readFileSync(`${directory}/cloudflare-version.yml`, "utf8"),
+  );
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "empty-deployment-"));
+  t.after(() => fs.rmSync(root, { recursive: true }));
+  for (const name of ["Validate invocation", "Validate credentials"]) {
+    const step = workflow.jobs.version.steps.find((step) => step.name === name);
+    assert.equal(step["working-directory"], "${{ github.workspace }}");
+    const result = spawnSync("bash", ["-euo", "pipefail", "-c", step.run], {
+      cwd: root,
+      env: { ...process.env, API_TOKEN: "test", ACCOUNT_ID: "account" },
+    });
+    assert.notEqual(result.error?.code, "ENOENT");
+    assert.equal(result.status, name === "Validate invocation" ? 1 : 0);
+  }
+});
+
+test("main promotion rejects feature branch dispatches before quality or deploy", () => {
+  const workflow = parse(
+    fs.readFileSync(`${directory}/cloudflare-main.yml`, "utf8"),
+  );
+  assert.equal(workflow.jobs.quality.needs, "validate");
+  const step = workflow.jobs.validate.steps[0];
+  for (const [ref, status] of [
+    ["refs/heads/main", 0],
+    ["refs/heads/feature", 1],
+    ["refs/tags/v1.0.0", 1],
+  ]) {
+    const result = spawnSync("bash", ["-euo", "pipefail", "-c", step.run], {
+      env: { ...process.env, SOURCE_REF: ref, DEFAULT_BRANCH: "main" },
+    });
+    assert.equal(result.status, status);
   }
 });

@@ -22,8 +22,8 @@ const REQUIRED_COVERAGE_THRESHOLDS = ["lines", "functions", "branches"];
 // PATH is not, which is why this is a closed set rather than a free string.
 const TOOLCHAINS = ["node", "rust"];
 const DEFAULT_TOOLCHAIN = "node";
-// Role to GitHub Environment name. For standard and chain this is also the
-// wrangler environment name. `single` has no wrangler environment at all — see
+// Role to GitHub Environment name. Wrangler names may differ during service
+// migrations. `single` has no wrangler environment at all — see
 // validateDeploymentPolicy.
 const TOPOLOGIES = {
   standard: { candidate: "staging", release: "production" },
@@ -134,6 +134,11 @@ export function validateDeploymentPolicy(policy) {
   }
   requireString(policy.workingDirectory, "deployment workingDirectory");
   requireString(policy.versionFile, "deployment versionFile");
+  if (policy.containers === undefined) {
+    policy.containers = false;
+  } else if (typeof policy.containers !== "boolean") {
+    throw new Error("deployment containers must be a boolean");
+  }
   if (policy.releasePrefix === undefined) {
     policy.releasePrefix = "";
   } else if (
@@ -268,15 +273,45 @@ export function validateDeploymentPolicy(policy) {
         target.wranglerEnv,
         `deployment targets.${role}.wranglerEnv`,
       );
-      if (target.wranglerEnv !== expected[role]) {
+      if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(target.wranglerEnv)) {
         throw new Error(
-          `${policy.topology} topology requires targets.${role}.wranglerEnv=${expected[role]}`,
+          `targets.${role}.wranglerEnv must be a lowercase letters-and-numbers slug`,
         );
       }
-      if (target.githubEnvironment !== target.wranglerEnv) {
+      if (target.githubEnvironment !== expected[role]) {
         throw new Error(
-          `targets.${role}.githubEnvironment must equal wranglerEnv`,
+          `${policy.topology} topology requires targets.${role}.githubEnvironment=${expected[role]}`,
         );
+      }
+    }
+
+    if (target.wranglerConfig !== undefined) {
+      requireString(target.wranglerConfig, `targets.${role}.wranglerConfig`);
+      if (
+        !/^[A-Za-z0-9_.\/-]+\.jsonc?$/.test(target.wranglerConfig) ||
+        path.isAbsolute(target.wranglerConfig) ||
+        target.wranglerConfig.split("/").includes("..")
+      ) {
+        throw new Error(
+          `targets.${role}.wranglerConfig must be a relative JSON/JSONC path without parent traversal`,
+        );
+      }
+    }
+    if (target.commands !== undefined) {
+      if (
+        !target.commands ||
+        typeof target.commands !== "object" ||
+        Array.isArray(target.commands)
+      ) {
+        throw new Error(`targets.${role}.commands must be an object`);
+      }
+      for (const [name, command] of Object.entries(target.commands)) {
+        if (!["prepare", "afterDeploy"].includes(name)) {
+          throw new Error(
+            `targets.${role}.commands has unknown lifecycle command ${name}`,
+          );
+        }
+        requireString(command, `targets.${role}.commands.${name}`);
       }
     }
 
@@ -286,6 +321,15 @@ export function validateDeploymentPolicy(policy) {
     ) {
       throw new Error("preview-specific GitHub Environments are forbidden");
     }
+  }
+
+  if (
+    !single &&
+    policy.targets.candidate.wranglerEnv === policy.targets.release.wranglerEnv
+  ) {
+    throw new Error(
+      "candidate and release must use distinct Wrangler environments",
+    );
   }
 
   // One Worker means one address. Divergent urls would put a wrong link in the

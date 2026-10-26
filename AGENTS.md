@@ -293,11 +293,38 @@ correctness problem, not a slow build.
 }
 ```
 
-Topology fixes the environment names for `standard` and `chain`. `standard`
+Topology fixes the GitHub Environment names for `standard` and `chain`. `standard`
 maps candidate to `staging` and release to `production`; `chain` maps them to
 `testnet` and `mainnet`.
-`githubEnvironment` must equal `wranglerEnv`, and neither may be `preview` or
-start with `preview-`.
+`wranglerEnv` is an explicit lowercase slug and may differ from the GitHub
+Environment, for existing versioned services such as `staging-v2`/`live-v2`.
+Candidate and release must use distinct Wrangler environments. GitHub
+Environments may never be `preview` or start with `preview-`.
+
+Container Workers declare `"containers": true` to build on
+`ubicloud-standard-8`; other Workers retain `ubicloud-standard-4`.
+
+Each target may declare `wranglerConfig`, a JSON/JSONC path relative to the
+deployment working directory. It is passed to both D1 migrations and the Worker
+upload/deploy. A generated file beside the source config preserves its relative
+entrypoint, Docker and migrations paths without changing tracked source.
+
+Targets may declare `commands.prepare` and `commands.afterDeploy`.
+Preparation runs after install and before build for both uploads and deployments.
+Use it to validate generated nonsecret configuration and add application
+build metadata. Verification runs only after deploy.
+Both commands run from the deployment working directory with no Cloudflare
+credentials. Missing declared Worker secrets fail before deployment.
+
+Deployments are serialized per repository, working directory and real target
+environment, with cancellation disabled. Callers must also disable cancellation
+in their own concurrency groups. Shared entrypoints have no cancelling groups.
+Main promotion rejects any ref other than the default branch, including manual
+dispatches from feature branches. Pull-request events cannot request deployment.
+
+Release prefixes intentionally route only their own namespace: an unrelated SDK
+release skips the Worker deployment; a malformed tag in the configured namespace
+fails. This keeps consumer release workflows declarative even in mixed repos.
 
 `single` is the third topology, for Workers with no wrangler `env` block. Both
 roles are the same Worker, so promotion splits by traffic rather than by
