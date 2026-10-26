@@ -352,7 +352,7 @@ test("Phala deployment is serialized and updates CVMs by id", () => {
   assert.equal(workflow.jobs.deploy.concurrency["cancel-in-progress"], true);
   assert.match(source, /existing_id=/);
   assert.match(source, /target=\(--cvm-id "\$existing_id"\)/);
-  assert.match(source, /has no id/);
+  assert.match(source, /has no valid app id/);
 });
 
 test("Phala never creates the release CVM", (t) => {
@@ -392,7 +392,8 @@ test("Phala never creates the release CVM", (t) => {
   );
   fs.writeFileSync(path.join(root, "phala-api-key"), "test-key");
 
-  const cvm = (name, id) => ({ name, id });
+  // phala@1.1.20 normalizes list output; it is not the raw CVM API shape.
+  const cvm = (cvmName, appId) => ({ cvmName, appId: appId.repeat(40) });
   const cases = [
     { role: "release", items: [], status: 1 },
     // A near-miss name is not the CVM; the search is a substring match.
@@ -400,6 +401,29 @@ test("Phala never creates the release CVM", (t) => {
     { role: "release", items: [cvm("service-production", "b")], status: 0 },
     { role: "candidate", items: [], status: 0 },
     { role: "candidate", items: [cvm("service-production", "c")], status: 0 },
+    {
+      role: "release",
+      items: [cvm("service-production", "b"), cvm("service-production", "c")],
+      status: 1,
+    },
+    { role: "release", items: [{ cvmName: "service-production" }], status: 1 },
+    {
+      role: "release",
+      items: [{ cvmName: "service-production", appId: "not-an-id" }],
+      status: 1,
+    },
+    {
+      role: "release",
+      items: [{ name: "service-production", id: "raw-api-id" }],
+      status: 1,
+    },
+    {
+      role: "release",
+      items: [
+        { cvmName: "service-production", appId: `${"a".repeat(40)}\ninvalid` },
+      ],
+      status: 1,
+    },
     // Anything that is not the candidate role is refused creation too.
     { role: "", items: [], status: 1 },
   ];
@@ -425,7 +449,9 @@ test("Phala never creates the release CVM", (t) => {
     });
     assert.equal(result.status, status, `${label}: ${result.stderr}`);
     const deploys = fs.readFileSync(deployLog, "utf8");
-    const existing = items.find((item) => item.name === "service-production");
+    const existing = items.find(
+      (item) => item.cvmName === "service-production",
+    );
 
     if (role !== "candidate") {
       // The release path never passes -n, whatever the lookup returned.
@@ -433,9 +459,17 @@ test("Phala never creates the release CVM", (t) => {
     }
     if (status !== 0) {
       assert.equal(deploys, "", `${label}: nothing may be deployed`);
-      assert.match(result.stdout, /::error::No Phala CVM is named/, label);
+      assert.match(
+        result.stdout,
+        /::error::(?:No Phala CVM is named|More than one Phala CVM|Existing Phala CVM .* has no valid app id)/,
+        label,
+      );
     } else if (existing) {
-      assert.match(deploys, new RegExp(`--cvm-id ${existing.id} `), label);
+      assert.match(
+        deploys,
+        new RegExp(`--cvm-id app_${existing.appId} `),
+        label,
+      );
       assert.doesNotMatch(deploys, /(^| )-n( |$)/m, label);
     } else {
       assert.match(deploys, /(^| )-n service-production /, label);
