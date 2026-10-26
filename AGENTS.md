@@ -555,7 +555,12 @@ path/symlink escapes. Secrets are validated on previews too, but materialized
 only after a successful build for deploy, in a mode `0600` temporary file read
 by the pinned action. Always clean up, including failure. Do not pass entire
 GitHub configuration contexts or service bundle contents to consumer commands.
-`pnpm build` regenerates both policy and environment materializer bundles.
+Optional `verificationSecrets` is a bundle-only subset of `workerSecrets`,
+requires each target's `afterDeploy` hook, and is materialized only after a
+successful deployment. Give that hook only `WORKER_VERIFICATION_SECRETS_FILE`, a
+mode `0600` subset file; never the whole bundle or deployment credentials. Remove
+both deployment and verification files even on failure. Previews never create
+verification files. `pnpm build` regenerates both bundled helpers.
 
 ### D1 migrations
 

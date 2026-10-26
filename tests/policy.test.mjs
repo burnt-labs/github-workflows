@@ -160,6 +160,7 @@ test("deployment accepts the topology environments", () => {
       workerSecrets: [],
       workerVariables: [],
       environmentSecret: "",
+      verificationSecrets: [],
       d1Migrations: [],
       containers: false,
     });
@@ -761,4 +762,46 @@ test("individual Worker secret policies retain their existing allowed names", ()
   for (const target of Object.values(policy.targets))
     target.wranglerConfig = ".wrangler.generated.jsonc";
   assert.throws(() => validateDeploymentPolicy(policy), /control credential/);
+});
+
+test("verification credentials are a bounded bundle-only subset with a probe", () => {
+  const policy = deploymentPolicy();
+  policy.environmentSecret = "SERVICE_ENV_JSON";
+  policy.workerSecrets = ["SERVICE_TOKEN", "METRICS_TOKEN"];
+  policy.verificationSecrets = ["METRICS_TOKEN"];
+  for (const target of Object.values(policy.targets)) {
+    target.wranglerConfig = ".wrangler.generated.jsonc";
+    target.commands = { afterDeploy: "node probe.mjs" };
+  }
+  assert.deepEqual(
+    validateDeploymentPolicy(structuredClone(policy)).verificationSecrets,
+    ["METRICS_TOKEN"],
+  );
+  for (const change of [
+    (p) => {
+      delete p.environmentSecret;
+    },
+    (p) => {
+      p.verificationSecrets = "METRICS_TOKEN";
+    },
+    (p) => {
+      p.verificationSecrets = ["UNDECLARED"];
+    },
+    (p) => {
+      p.verificationSecrets = ["GITHUB_TOKEN"];
+    },
+    (p) => {
+      p.verificationSecrets = ["METRICS_TOKEN", "METRICS_TOKEN"];
+    },
+    (p) => {
+      delete p.targets.candidate.commands;
+    },
+    (p) => {
+      delete p.targets.release.commands.afterDeploy;
+    },
+  ]) {
+    const copy = structuredClone(policy);
+    change(copy);
+    assert.throws(() => validateDeploymentPolicy(copy));
+  }
 });

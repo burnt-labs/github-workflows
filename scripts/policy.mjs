@@ -272,6 +272,23 @@ export function validateDeploymentPolicy(policy) {
     );
   }
 
+  // Authenticated acceptance checks receive only an explicitly declared subset.
+  if (policy.verificationSecrets === undefined) policy.verificationSecrets = [];
+  if (!Array.isArray(policy.verificationSecrets))
+    throw new Error("deployment verificationSecrets must be an array");
+  if (policy.verificationSecrets.length && !policy.environmentSecret)
+    throw new Error("verificationSecrets requires environmentSecret");
+  const verification = new Set();
+  for (const name of policy.verificationSecrets) {
+    if (!policy.workerSecrets.includes(name) || controlNames.has(name))
+      throw new Error(
+        "verificationSecrets must contain only declared runtime workerSecrets",
+      );
+    if (verification.has(name))
+      throw new Error("verificationSecrets must not contain duplicates");
+    verification.add(name);
+  }
+
   // D1 databases whose migrations apply before each deploy, by binding or
   // database name — whichever `wrangler d1 migrations apply` should receive.
   // In policy for the same reason workerSecrets is: the alternative is every
@@ -356,6 +373,11 @@ export function validateDeploymentPolicy(policy) {
       }
     }
 
+    if (policy.verificationSecrets.length && !target.commands?.afterDeploy) {
+      throw new Error(
+        `verificationSecrets requires targets.${role}.commands.afterDeploy`,
+      );
+    }
     if (policy.environmentSecret && target.wranglerConfig === undefined) {
       throw new Error(
         `environmentSecret requires targets.${role}.wranglerConfig`,

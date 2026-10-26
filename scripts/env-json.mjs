@@ -153,3 +153,32 @@ export function materializeWorkerSecrets(options) {
     throw error;
   }
 }
+
+/** A post-deployment probe receives only its allowlisted runtime credentials. */
+export function materializeVerificationSecrets(options) {
+  const { runnerTemp, operation } = options;
+  const output = path.join(runnerTemp, "worker-verification-secrets.json");
+  try {
+    fs.rmSync(output, { force: true });
+    if (operation !== "deploy")
+      throw new Error(
+        "Verification secrets may be materialized only after deploy",
+      );
+    const { policy, values } = inputs(options);
+    if (!policy.verificationSecrets.length)
+      throw new Error(
+        "verificationSecrets is required for probe materialization",
+      );
+    const secrets = Object.fromEntries(
+      policy.verificationSecrets.map((name) => [name, values.secrets[name]]),
+    );
+    fs.writeFileSync(output, `${JSON.stringify(secrets)}\n`, {
+      mode: 0o600,
+      flag: "wx",
+    });
+    return output;
+  } catch (error) {
+    fs.rmSync(output, { force: true });
+    throw error;
+  }
+}

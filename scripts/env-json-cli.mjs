@@ -1,6 +1,7 @@
 import {
   materializePublicConfiguration,
   materializeWorkerSecrets,
+  materializeVerificationSecrets,
 } from "./env-json.mjs";
 
 try {
@@ -14,6 +15,8 @@ try {
   };
   if (process.argv[2] === "prepare") materializePublicConfiguration(options);
   else if (process.argv[2] === "secrets") materializeWorkerSecrets(options);
+  else if (process.argv[2] === "verification")
+    materializeVerificationSecrets(options);
   else throw new Error("Unknown environment bundle operation");
 } catch {
   // Do not expose JSON parser snippets, paths, names, or any runtime values.

@@ -266,10 +266,36 @@ jobs:
         if: always()
         working-directory: ${{ github.workspace }}
         run: rm -f "$RUNNER_TEMP/worker-secrets.json"
+      - name: Collect verification secrets
+        id: verification-secrets
+        if: >-
+          inputs.operation == 'deploy' && steps.wrangler.outcome == 'success' &&
+          fromJSON(inputs.deployment-policy).verificationSecrets[0] != null
+        working-directory: ${{ github.workspace }}
+        env:
+          DEPLOYMENT_POLICY: ${{ inputs.deployment-policy }}
+          TARGET: ${{ inputs.target }}
+          OPERATION: ${{ inputs.operation }}
+          ENVIRONMENT_JSON: ${{ secrets[fromJSON(inputs.deployment-policy).environmentSecret] }}
+        run: node .burnt-workflows/scripts/env-json.bundle.mjs verification
       - name: Verify deployment
-        if: inputs.operation == 'deploy' && fromJSON(inputs.deployment-policy).targets[inputs.target].commands.afterDeploy != null
+        if: >-
+          inputs.operation == 'deploy' &&
+          fromJSON(inputs.deployment-policy).targets[inputs.target].commands.afterDeploy != null &&
+          fromJSON(inputs.deployment-policy).verificationSecrets[0] == null
         working-directory: ${{ fromJSON(inputs.deployment-policy).workingDirectory }}
         run: ${{ fromJSON(inputs.deployment-policy).targets[inputs.target].commands.afterDeploy }}
+      - name: Verify deployment with scoped secrets
+        if: >-
+          inputs.operation == 'deploy' && steps.verification-secrets.outcome == 'success'
+        working-directory: ${{ fromJSON(inputs.deployment-policy).workingDirectory }}
+        env:
+          WORKER_VERIFICATION_SECRETS_FILE: ${{ runner.temp }}/worker-verification-secrets.json
+        run: ${{ fromJSON(inputs.deployment-policy).targets[inputs.target].commands.afterDeploy }}
+      - name: Remove verification secrets file
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: rm -f "$RUNNER_TEMP/worker-verification-secrets.json"
       - name: Extract Cloudflare metadata
         id: metadata
         env:

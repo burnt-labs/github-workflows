@@ -1245,6 +1245,21 @@ function validateDeploymentPolicy(policy) {
       "deployment environmentSecret must not also be runtime configuration",
     );
   }
+  if (policy.verificationSecrets === void 0) policy.verificationSecrets = [];
+  if (!Array.isArray(policy.verificationSecrets))
+    throw new Error("deployment verificationSecrets must be an array");
+  if (policy.verificationSecrets.length && !policy.environmentSecret)
+    throw new Error("verificationSecrets requires environmentSecret");
+  const verification = /* @__PURE__ */ new Set();
+  for (const name of policy.verificationSecrets) {
+    if (!policy.workerSecrets.includes(name) || controlNames.has(name))
+      throw new Error(
+        "verificationSecrets must contain only declared runtime workerSecrets",
+      );
+    if (verification.has(name))
+      throw new Error("verificationSecrets must not contain duplicates");
+    verification.add(name);
+  }
   if (policy.d1Migrations === void 0) {
     policy.d1Migrations = [];
   } else if (!Array.isArray(policy.d1Migrations)) {
@@ -1303,6 +1318,11 @@ function validateDeploymentPolicy(policy) {
           `${policy.topology} topology requires targets.${role}.githubEnvironment=${expected[role]}`,
         );
       }
+    }
+    if (policy.verificationSecrets.length && !target.commands?.afterDeploy) {
+      throw new Error(
+        `verificationSecrets requires targets.${role}.commands.afterDeploy`,
+      );
     }
     if (policy.environmentSecret && target.wranglerConfig === void 0) {
       throw new Error(

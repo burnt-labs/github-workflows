@@ -1350,3 +1350,37 @@ test("Cloudflare bundles validate before build and never expose secrets to consu
   assert.match(checkout.with.ref, /^[0-9a-f]{40}$/);
   assert.equal(checkout.with["persist-credentials"], false);
 });
+
+test("authenticated probes receive only a late scoped file and always remove it", () => {
+  const workflow = parse(
+    fs.readFileSync(`${directory}/cloudflare-version.yml`, "utf8"),
+  );
+  const steps = workflow.jobs.version.steps;
+  const index = (name) => steps.findIndex((step) => step.name === name);
+  const collect = steps[index("Collect verification secrets")];
+  assert.ok(
+    index("Upload or deploy Worker version") <
+      index("Collect verification secrets"),
+  );
+  assert.ok(
+    index("Remove Worker secrets file") < index("Collect verification secrets"),
+  );
+  assert.match(collect.if, /inputs.operation == 'deploy'/);
+  assert.match(collect.if, /steps.wrangler.outcome == 'success'/);
+  assert.match(collect.if, /verificationSecrets\[0\] != null/);
+  const probe = steps[index("Verify deployment with scoped secrets")];
+  assert.deepEqual(Object.keys(probe.env), [
+    "WORKER_VERIFICATION_SECRETS_FILE",
+  ]);
+  assert.match(probe.if, /verification-secrets.outcome == 'success'/);
+  assert.match(
+    steps[index("Verify deployment")].if,
+    /verificationSecrets\[0\] == null/,
+  );
+  const cleanup = steps[index("Remove verification secrets file")];
+  assert.equal(cleanup.if, "always()");
+  assert.ok(
+    index("Verify deployment with scoped secrets") <
+      index("Remove verification secrets file"),
+  );
+});

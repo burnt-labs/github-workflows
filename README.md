@@ -170,6 +170,18 @@ action's `--secrets-file`. Cleanup runs even on failure. Previews validate secre
 presence but never materialize or upload secrets. Errors never echo bundle JSON
 or values. A bundle does not rotate or revoke existing Worker secrets implicitly.
 
+Authenticated acceptance probes can declare `verificationSecrets`, an optional
+subset of `workerSecrets`, when using a bundle. Each target must then declare
+`commands.afterDeploy`. After a successful deploy, the platform creates a separate
+mode `0600` file containing only that subset and provides its path as
+`WORKER_VERIFICATION_SECRETS_FILE` to the probe. The complete bundle and deployment
+credentials are never passed to the probe. The original deployment secrets file
+has already been removed. Probe-file cleanup runs even if the probe fails.
+Previews never create the file or run the probe. With no subset declared, the
+existing unprivileged `afterDeploy` command remains unchanged. For example,
+`verificationSecrets: ["METRICS_TOKEN"]` preserves an authenticated metrics check
+without handing the probe unrelated runtime credentials.
+
 Cue's `sync-github-env-json.mjs` documents the existing 1Password `DevOps`
 service/environment item process; synchronize the named GitHub Environment secret
 through that operator process without printing values. The workflow never reads

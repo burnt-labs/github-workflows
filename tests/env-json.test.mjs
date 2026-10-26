@@ -7,6 +7,7 @@ import test from "node:test";
 import {
   materializePublicConfiguration,
   materializeWorkerSecrets,
+  materializeVerificationSecrets,
   removeSecretsFile,
   validateEnvironmentBundle,
 } from "../scripts/env-json.mjs";
@@ -435,4 +436,137 @@ test("generated configuration cannot overwrite an existing unrelated sibling fil
     "sentinel original package metadata",
   );
   assert.equal(fs.readFileSync(options.source, "utf8"), options.original);
+});
+
+function verificationFixture(t) {
+  const options = fixture(t);
+  options.policy.workerSecrets.push("METRICS_KEY");
+  options.policy.verificationSecrets = ["METRICS_KEY"];
+  for (const target of Object.values(options.policy.targets))
+    target.commands = { afterDeploy: "node probe.mjs" };
+  const bundle = JSON.parse(options.bundle);
+  bundle.secrets.METRICS_KEY = "private-metrics-marker";
+  options.bundle = JSON.stringify(bundle);
+  return options;
+}
+
+test("verification materializes only the declared subset at mode0600 after deploy", (t) => {
+  const options = verificationFixture(t);
+  const output = path.join(
+    options.runnerTemp,
+    "worker-verification-secrets.json",
+  );
+  materializePublicConfiguration(options);
+  assert.equal(fs.existsSync(output), false);
+  assert.throws(
+    () => materializeVerificationSecrets({ ...options, operation: "preview" }),
+    /only after deploy/,
+  );
+  assert.equal(fs.existsSync(output), false);
+  assert.equal(
+    materializeVerificationSecrets({ ...options, operation: "deploy" }),
+    output,
+  );
+  assert.deepEqual(JSON.parse(fs.readFileSync(output, "utf8")), {
+    METRICS_KEY: "private-metrics-marker",
+  });
+  assert.equal(fs.statSync(output).mode & 0o777, 0o600);
+  assert.doesNotMatch(
+    fs.readFileSync(output, "utf8"),
+    /super-private-runtime-marker/,
+  );
+});
+
+test("failed verification materialization removes stale files without exposing values", (t) => {
+  const options = verificationFixture(t);
+  const output = path.join(
+    options.runnerTemp,
+    "worker-verification-secrets.json",
+  );
+  fs.writeFileSync(output, "stale-probe-secret");
+  const bundle = JSON.parse(options.bundle);
+  delete bundle.secrets.METRICS_KEY;
+  const result = runCli(options, "verification", JSON.stringify(bundle));
+  assert.equal(result.status, 1);
+  assert.equal(fs.existsSync(output), false);
+  assert.doesNotMatch(
+    result.stdout + result.stderr,
+    /private-metrics-marker|super-private-runtime-marker|stale-probe-secret/,
+  );
+  options.policy.verificationSecrets = [];
+  assert.throws(
+    () => materializeVerificationSecrets({ ...options, operation: "deploy" }),
+    /verificationSecrets is required/,
+  );
+});
+
+test("workflow scoped probe receives only its file and cleanup runs after probe failure", async (t) => {
+  const { parse } = await import("yaml");
+  const workflow = parse(
+    fs.readFileSync(".github/workflows/cloudflare-version.yml", "utf8"),
+  );
+  const commands = Object.fromEntries(
+    workflow.jobs.version.steps.map((step) => [step.name, step.run]),
+  );
+  const options = verificationFixture(t);
+  fs.mkdirSync(path.join(options.root, ".burnt-workflows/scripts"), {
+    recursive: true,
+  });
+  fs.copyFileSync(
+    "scripts/env-json.bundle.mjs",
+    path.join(options.root, ".burnt-workflows/scripts/env-json.bundle.mjs"),
+  );
+  const env = {
+    PATH: process.env.PATH,
+    GITHUB_WORKSPACE: options.root,
+    RUNNER_TEMP: options.runnerTemp,
+    DEPLOYMENT_POLICY: JSON.stringify(options.policy),
+    TARGET: options.target,
+    OPERATION: "deploy",
+  };
+  const execute = (name, secret = false) =>
+    spawnSync("bash", ["-euo", "pipefail", "-c", commands[name]], {
+      cwd: options.root,
+      env: { ...env, ...(secret ? { ENVIRONMENT_JSON: options.bundle } : {}) },
+      encoding: "utf8",
+    });
+  const output = path.join(
+    options.runnerTemp,
+    "worker-verification-secrets.json",
+  );
+  try {
+    assert.equal(
+      execute("Materialize public Worker variables", true).status,
+      0,
+    );
+    assert.equal(fs.existsSync(output), false);
+    assert.equal(execute("Materialize bundled Worker secrets", true).status, 0);
+    // Simulate successful pinned deployment and removal of its complete secret input.
+    assert.equal(execute("Remove Worker secrets file").status, 0);
+    assert.equal(execute("Collect verification secrets", true).status, 0);
+    const probeEnv = {
+      PATH: process.env.PATH,
+      WORKER_VERIFICATION_SECRETS_FILE: output,
+    };
+    const probe = spawnSync(
+      process.execPath,
+      [
+        "-e",
+        `
+      const fs = require('node:fs');
+      if (process.env.ENVIRONMENT_JSON || process.env.CLOUDFLARE_API_TOKEN || process.env.ALL_SECRETS) process.exit(2);
+      const scoped = JSON.parse(fs.readFileSync(process.env.WORKER_VERIFICATION_SECRETS_FILE));
+      if (JSON.stringify(Object.keys(scoped)) !== '["METRICS_KEY"]') process.exit(3);
+      if (fs.existsSync(${JSON.stringify(path.join(options.runnerTemp, "worker-secrets.json"))})) process.exit(4);
+      process.exit(1);
+    `,
+      ],
+      { env: probeEnv, encoding: "utf8" },
+    );
+    assert.equal(probe.status, 1);
+    assert.equal(probe.stdout + probe.stderr, "");
+  } finally {
+    assert.equal(execute("Remove verification secrets file").status, 0);
+    assert.equal(fs.existsSync(output), false);
+  }
 });

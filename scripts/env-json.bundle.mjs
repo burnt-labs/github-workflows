@@ -1172,6 +1172,21 @@ function validateDeploymentPolicy(policy) {
       "deployment environmentSecret must not also be runtime configuration",
     );
   }
+  if (policy.verificationSecrets === void 0) policy.verificationSecrets = [];
+  if (!Array.isArray(policy.verificationSecrets))
+    throw new Error("deployment verificationSecrets must be an array");
+  if (policy.verificationSecrets.length && !policy.environmentSecret)
+    throw new Error("verificationSecrets requires environmentSecret");
+  const verification = /* @__PURE__ */ new Set();
+  for (const name of policy.verificationSecrets) {
+    if (!policy.workerSecrets.includes(name) || controlNames.has(name))
+      throw new Error(
+        "verificationSecrets must contain only declared runtime workerSecrets",
+      );
+    if (verification.has(name))
+      throw new Error("verificationSecrets must not contain duplicates");
+    verification.add(name);
+  }
   if (policy.d1Migrations === void 0) {
     policy.d1Migrations = [];
   } else if (!Array.isArray(policy.d1Migrations)) {
@@ -1230,6 +1245,11 @@ function validateDeploymentPolicy(policy) {
           `${policy.topology} topology requires targets.${role}.githubEnvironment=${expected[role]}`,
         );
       }
+    }
+    if (policy.verificationSecrets.length && !target.commands?.afterDeploy) {
+      throw new Error(
+        `verificationSecrets requires targets.${role}.commands.afterDeploy`,
+      );
     }
     if (policy.environmentSecret && target.wranglerConfig === void 0) {
       throw new Error(
@@ -1448,6 +1468,38 @@ function materializeWorkerSecrets(options) {
     throw error;
   }
 }
+function materializeVerificationSecrets(options) {
+  const { runnerTemp, operation } = options;
+  const output = path2.join(runnerTemp, "worker-verification-secrets.json");
+  try {
+    fs.rmSync(output, { force: true });
+    if (operation !== "deploy")
+      throw new Error(
+        "Verification secrets may be materialized only after deploy",
+      );
+    const { policy, values } = inputs(options);
+    if (!policy.verificationSecrets.length)
+      throw new Error(
+        "verificationSecrets is required for probe materialization",
+      );
+    const secrets = Object.fromEntries(
+      policy.verificationSecrets.map((name) => [name, values.secrets[name]]),
+    );
+    fs.writeFileSync(
+      output,
+      `${JSON.stringify(secrets)}
+`,
+      {
+        mode: 384,
+        flag: "wx",
+      },
+    );
+    return output;
+  } catch (error) {
+    fs.rmSync(output, { force: true });
+    throw error;
+  }
+}
 
 // scripts/env-json-cli.mjs
 try {
@@ -1461,6 +1513,8 @@ try {
   };
   if (process.argv[2] === "prepare") materializePublicConfiguration(options);
   else if (process.argv[2] === "secrets") materializeWorkerSecrets(options);
+  else if (process.argv[2] === "verification")
+    materializeVerificationSecrets(options);
   else throw new Error("Unknown environment bundle operation");
 } catch {
   process.stderr.write(
