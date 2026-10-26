@@ -686,7 +686,7 @@ test("release rejects an unrecognized operation instead of skipping", () => {
   assert.match(source, /operation must be preview or deploy/);
   assert.equal(
     workflow.jobs["preview-release"].if,
-    "inputs.operation == 'preview'",
+    "inputs.operation == 'preview' && needs.validate-release-tag.outputs.selected == 'true'",
   );
   assert.match(
     workflow.jobs["deploy-release"].if,
@@ -696,7 +696,7 @@ test("release rejects an unrecognized operation instead of skipping", () => {
   assert.deepEqual(workflow.jobs.quality.needs, "validate");
 });
 
-test("release rejects tags from another app namespace", () => {
+test("release routes namespaces and rejects malformed selected tags", () => {
   const workflow = parse(
     fs.readFileSync(`${directory}/cloudflare-release.yml`, "utf8"),
   );
@@ -710,7 +710,7 @@ test("release rejects tags from another app namespace", () => {
     ["screening-v1.2.3-rc.7", "true", 0],
     ["screening-v1.2.3-rc.7", "false", 1],
     ["screening-v1.2.3", "true", 1],
-    ["burnt-v1.2.3", "false", 1],
+    ["burnt-v1.2.3", "false", 0],
   ]) {
     const result = spawnSync(
       "bash",
@@ -719,6 +719,7 @@ test("release rejects tags from another app namespace", () => {
         env: {
           ...process.env,
           PRERELEASE: prerelease,
+          GITHUB_OUTPUT: "/dev/null",
           RELEASE_PREFIX: "screening",
           RELEASE_TAG: releaseTag,
         },
@@ -1247,23 +1248,16 @@ test("Cloudflare lifecycle commands preserve deployment boundaries and ordering"
   );
   assert.match(prepare.env.GITHUB_ENVIRONMENT_VARIABLES_JSON, /toJSON\(vars\)/);
   assert.equal(prepare.env.CLOUDFLARE_API_TOKEN, undefined);
-  const before = steps.find(
-    (step) => step.name === "Prepare deployment resources",
-  );
   const after = steps.find((step) => step.name === "Verify deployment");
-  for (const hook of [before, after]) {
-    assert.match(hook.if, /inputs.operation == 'deploy'/);
-    assert.match(hook.env.CLOUDFLARE_API_TOKEN, /secrets/);
-    assert.match(hook["working-directory"], /deployment-policy/);
-  }
+  assert.match(after.if, /inputs.operation == 'deploy'/);
+  assert.equal(after.env, undefined);
+  assert.match(after["working-directory"], /deployment-policy/);
+  assert.equal(
+    steps.find((step) => step.name === "Prepare deployment resources"),
+    undefined,
+  );
   const index = (name) => steps.findIndex((step) => step.name === name);
   assert.ok(index("Prepare target configuration") < index("Build"));
-  assert.ok(
-    index("Collect Worker secrets") < index("Prepare deployment resources"),
-  );
-  assert.ok(
-    index("Prepare deployment resources") < index("Apply D1 migrations"),
-  );
   assert.ok(
     index("Apply D1 migrations") < index("Upload or deploy Worker version"),
   );
@@ -1277,5 +1271,41 @@ test("Cloudflare lifecycle commands preserve deployment boundaries and ordering"
   )) {
     assert.match(JSON.stringify(step), /wranglerConfig/);
     assert.match(JSON.stringify(step), /--config/);
+  }
+});
+
+test("pre-checkout guards work with nested policies on an empty workspace", (t) => {
+  const workflow = parse(
+    fs.readFileSync(`${directory}/cloudflare-version.yml`, "utf8"),
+  );
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "empty-deployment-"));
+  t.after(() => fs.rmSync(root, { recursive: true }));
+  for (const name of ["Validate invocation", "Validate credentials"]) {
+    const step = workflow.jobs.version.steps.find((step) => step.name === name);
+    assert.equal(step["working-directory"], "${{ github.workspace }}");
+    const result = spawnSync("bash", ["-euo", "pipefail", "-c", step.run], {
+      cwd: root,
+      env: { ...process.env, API_TOKEN: "test", ACCOUNT_ID: "account" },
+    });
+    assert.notEqual(result.error?.code, "ENOENT");
+    assert.equal(result.status, name === "Validate invocation" ? 1 : 0);
+  }
+});
+
+test("main promotion rejects feature branch dispatches before quality or deploy", () => {
+  const workflow = parse(
+    fs.readFileSync(`${directory}/cloudflare-main.yml`, "utf8"),
+  );
+  assert.equal(workflow.jobs.quality.needs, "validate");
+  const step = workflow.jobs.validate.steps[0];
+  for (const [ref, status] of [
+    ["refs/heads/main", 0],
+    ["refs/heads/feature", 1],
+    ["refs/tags/v1.0.0", 1],
+  ]) {
+    const result = spawnSync("bash", ["-euo", "pipefail", "-c", step.run], {
+      env: { ...process.env, SOURCE_REF: ref, DEFAULT_BRANCH: "main" },
+    });
+    assert.equal(result.status, status);
   }
 });

@@ -641,7 +641,6 @@ test("deployment validates container capacity, generated config and lifecycle co
   policy.targets.candidate.wranglerConfig = ".generated/staging/wrangler.jsonc";
   policy.targets.candidate.commands = {
     prepare: "node prepare.mjs",
-    beforeDeploy: "node provision.mjs",
     afterDeploy: "node verify.mjs",
   };
   assert.equal(validateDeploymentPolicy(policy).containers, true);
@@ -670,7 +669,8 @@ test("deployment validates container capacity, generated config and lifecycle co
     [],
     "deploy",
     { prepare: "" },
-    { beforeDeploy: " " },
+    { afterDeploy: " " },
+    { beforeDeploy: "true" },
     { typo: "true" },
   ]) {
     const invalid = deploymentPolicy();

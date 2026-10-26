@@ -66,12 +66,21 @@ jobs:
     name: Validate app release tag
     needs: quality
     runs-on: ubicloud-standard-2
+    outputs:
+      selected: ${{ steps.route.outputs.selected }}
     env:
       PRERELEASE: ${{ inputs.prerelease }}
       RELEASE_PREFIX: ${{ fromJSON(needs.quality.outputs.deployment-policy).releasePrefix }}
       RELEASE_TAG: ${{ inputs.release-tag }}
     steps:
-      - run: |
+      - id: route
+        run: |
+          if [ -n "$RELEASE_PREFIX" ] && [[ "$RELEASE_TAG" != "$RELEASE_PREFIX-"* ]]; then
+            echo "Release is outside the configured namespace; no deployment requested."
+            echo "selected=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "selected=true" >> "$GITHUB_OUTPUT"
           tag_prefix=""
           if [ -n "$RELEASE_PREFIX" ]; then tag_prefix="${RELEASE_PREFIX}-"; fi
           stable_pattern="^${tag_prefix}v[0-9]+\.[0-9]+\.[0-9]+$"
@@ -85,7 +94,7 @@ jobs:
 
   preview-release:
     needs: [quality, validate-release-tag]
-    if: inputs.operation == 'preview'
+    if: inputs.operation == 'preview' && needs.validate-release-tag.outputs.selected == 'true'
     permissions:
       contents: read
       deployments: write
@@ -102,6 +111,7 @@ jobs:
   deploy-release:
     needs: [quality, validate-release-tag]
     if: >-
+      needs.validate-release-tag.outputs.selected == 'true' &&
       inputs.operation == 'deploy' &&
       inputs.prerelease == false &&
       fromJSON(needs.quality.outputs.deployment-policy).promotionMode == 'manual'

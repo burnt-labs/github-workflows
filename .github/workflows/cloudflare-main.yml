@@ -26,7 +26,21 @@ permissions:
   contents: read
 
 jobs:
+  validate:
+    name: Validate deployment ref
+    runs-on: ubicloud-standard-2
+    steps:
+      - env:
+          SOURCE_REF: ${{ github.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if [ "$SOURCE_REF" != "refs/heads/$DEFAULT_BRANCH" ]; then
+            echo "::error::Main promotion requires the repository default branch"
+            exit 1
+          fi
+
   quality:
+    needs: validate
     uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@8cb70d99d4743faa900cec1ff7adcdacd17fdae8 # unreleased
     with:
       quality-policy-path: ${{ inputs.quality-policy-path }}

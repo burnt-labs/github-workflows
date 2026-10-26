@@ -306,7 +306,7 @@ export function validateDeploymentPolicy(policy) {
         throw new Error(`targets.${role}.commands must be an object`);
       }
       for (const [name, command] of Object.entries(target.commands)) {
-        if (!["prepare", "beforeDeploy", "afterDeploy"].includes(name)) {
+        if (!["prepare", "afterDeploy"].includes(name)) {
           throw new Error(
             `targets.${role}.commands has unknown lifecycle command ${name}`,
           );

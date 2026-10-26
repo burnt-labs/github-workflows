@@ -309,31 +309,23 @@ deployment working directory. It is passed to both D1 migrations and the Worker
 upload/deploy. A generated file beside the source config preserves its relative
 entrypoint, Docker and migrations paths without changing tracked source.
 
-Targets may declare `commands.prepare`, `commands.beforeDeploy` and
-`commands.afterDeploy`. Preparation runs after install and before build for
-both uploads and deployments. It receives `GITHUB_ENVIRONMENT_VARIABLES_JSON`,
-the selected environment's nonsecret Actions variables, and must validate any
-configuration document it consumes. Do not print that snapshot. Deployment
-hooks run only on deploy, before D1 migrations and after the Worker deployment,
-with the centrally selected Cloudflare credentials. Missing declared Worker
-secrets fail before the first deployment hook. Every hook runs from the
-deployment working directory and its failure stops the run. Deployments are
-serialized per repository, working directory and real target environment, with
-cancellation disabled so a consumer handoff cannot be interrupted by a newer
-run. Hooks must be idempotent and fail closed; they must not restore an old
-deployment automatically.
+Targets may declare `commands.prepare` and `commands.afterDeploy`.
+Preparation runs after install and before build for both uploads and deployments.
+It receives `GITHUB_ENVIRONMENT_VARIABLES_JSON`, the selected environment's
+nonsecret Actions variables, and must validate any configuration document it
+consumes. Do not print that snapshot. Verification runs only after deploy.
+Both commands run from the deployment working directory with no Cloudflare
+credentials. Missing declared Worker secrets fail before deployment.
 
-Hooks are an explicit trust boundary: consumer-resolved code receives the
-Cloudflare token on deployment. Callers must limit deploying triggers to
-protected deployment refs/environments and must disable cancellation on their
-own concurrency groups; a parent workflow can otherwise cancel a reusable job.
-The shared entry points have no cancelling concurrency groups. Pull-request
-events cannot request a deploy operation; previews never run credentialed hooks.
+Deployments are serialized per repository, working directory and real target
+environment, with cancellation disabled. Callers must also disable cancellation
+in their own concurrency groups. Shared entrypoints have no cancelling groups.
+Main promotion rejects any ref other than the default branch, including manual
+dispatches from feature branches. Pull-request events cannot request deployment.
 
-These lifecycle commands serve provisioning, queue consumer transfers and
-application verification without putting credential handling in consumer
-workflows. The explicit shared-workflow migration request authorizes this
-capability before a second consumer adopts it.
+Release prefixes intentionally route only their own namespace: an unrelated SDK
+release skips the Worker deployment; a malformed tag in the configured namespace
+fails. This keeps consumer release workflows declarative even in mixed repos.
 
 `single` is the third topology, for Workers with no wrangler `env` block. Both
 roles are the same Worker, so promotion splits by traffic rather than by
