@@ -323,6 +323,13 @@ cancellation disabled so a consumer handoff cannot be interrupted by a newer
 run. Hooks must be idempotent and fail closed; they must not restore an old
 deployment automatically.
 
+Hooks are an explicit trust boundary: consumer-resolved code receives the
+Cloudflare token on deployment. Callers must limit deploying triggers to
+protected deployment refs/environments and must disable cancellation on their
+own concurrency groups; a parent workflow can otherwise cancel a reusable job.
+The shared entry points have no cancelling concurrency groups. Pull-request
+events cannot request a deploy operation; previews never run credentialed hooks.
+
 These lifecycle commands serve provisioning, queue consumer transfers and
 application verification without putting credential handling in consumer
 workflows. The explicit shared-workflow migration request authorizes this

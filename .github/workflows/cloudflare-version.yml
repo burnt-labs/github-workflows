@@ -75,9 +75,10 @@ jobs:
       - name: Validate invocation
         if: >-
           !contains(fromJSON('["preview","deploy"]'), inputs.operation) ||
-          !contains(fromJSON('["candidate","release"]'), inputs.target)
+          !contains(fromJSON('["candidate","release"]'), inputs.target) ||
+          (inputs.operation == 'deploy' && contains(fromJSON('["pull_request","pull_request_target"]'), github.event_name))
         run: |
-          echo "::error::Invalid operation or target"
+          echo "::error::Invalid operation or target, or a deployment requested from a pull request"
           exit 1
       - name: Validate credentials
         # A caller passing `secrets: inherit` supplies these under the
@@ -210,10 +211,11 @@ jobs:
       # Cloudflare error 10215 when that version is an undeployed upload, which
       # is the normal state after any preview or single-topology candidate.
       #
-      # Two steps, deliberately. This one has the secrets but no Cloudflare
-      # credential and runs only jq from the runner image. The deploy has the
-      # credential but is SHA-pinned code. Neither has both a consumer-resolved
-      # binary and the token.
+      # Secret collection itself runs only runner-provided jq; the upload uses
+      # a pinned action. Declared lifecycle hooks intentionally execute consumer
+      # code with Cloudflare credentials. Callers must restrict deployments to
+      # their protected deployment refs and environments. PR events are rejected
+      # for deploy operations before any hook executes.
       - name: Upload or deploy Worker version
         id: wrangler
         uses: cloudflare/wrangler-action@953926a2e2182532811c01a25e53647d93bf07c0 # v4.1.3

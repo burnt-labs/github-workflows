@@ -1222,6 +1222,20 @@ test("Cloudflare lifecycle commands preserve deployment boundaries and ordering"
     fs.readFileSync(`${directory}/cloudflare-version.yml`, "utf8"),
   );
   const job = workflow.jobs.version;
+  assert.match(
+    job.steps.find((step) => step.name === "Validate invocation").if,
+    /pull_request_target/,
+  );
+  for (const name of [
+    "cloudflare-main.yml",
+    "cloudflare-release.yml",
+    "cloudflare-pr.yml",
+  ]) {
+    const entry = parse(fs.readFileSync(`${directory}/${name}`, "utf8"));
+    assert.notEqual(entry.concurrency?.["cancel-in-progress"], true);
+    for (const call of Object.values(entry.jobs))
+      assert.notEqual(call.concurrency?.["cancel-in-progress"], true);
+  }
   assert.equal(job.concurrency["cancel-in-progress"], false);
   const steps = job.steps;
   const prepare = steps.find(
