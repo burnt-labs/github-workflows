@@ -136,7 +136,7 @@ environment. Runtime configuration and deployment credentials stay separate.
 }
 ```
 
-The named secret has exactly this shape, with every declared key present:
+The named secret has exactly this shape:
 
 ```json
 {
@@ -145,12 +145,17 @@ The named secret has exactly this shape, with every declared key present:
 }
 ```
 
-Values must be strings; secrets must be nonempty. Empty public values are allowed
-so the application can validate their meaning. Unknown keys, missing names,
-variable/secret overlap, control credentials and invalid JSON fail the run.
-There is no merge with individual GitHub variables/secrets or checked-in vars.
-Consumers pass `secrets: inherit`; the shared workflow selects only
-`environmentSecret`, never passes the full context to application commands.
+Values must be strings. A missing, empty or whitespace-only entry in `secrets`
+falls back to the standalone GitHub secret with the same policy-declared name
+from the target environment's secrets context. Nonempty bundle values win.
+The bundle and its `vars` and `secrets` objects are still required; use
+`"secrets": {}` when all runtime secrets are standalone. Missing or blank values
+in both sources, non-string values, unknown bundle keys, variable/secret overlap,
+control credentials and invalid JSON fail the run. Public vars must all be in
+the bundle; empty public values are allowed for application validation.
+Consumers pass `secrets: inherit`; only the central helper receives the secrets
+context and selects policy-declared runtime names. It never passes the context
+to application commands or merges individual GitHub variables or checked-in vars.
 Without `environmentSecret`, the existing individual `workerSecrets` contract
 continues to apply. `workerVariables` requires a bundle.
 

@@ -9,6 +9,7 @@ try {
     policy: JSON.parse(process.env.DEPLOYMENT_POLICY),
     target: process.env.TARGET,
     bundle: process.env.ENVIRONMENT_JSON,
+    githubSecrets: process.env.ALL_SECRETS,
     root: process.env.GITHUB_WORKSPACE,
     runnerTemp: process.env.RUNNER_TEMP,
     operation: process.env.OPERATION,

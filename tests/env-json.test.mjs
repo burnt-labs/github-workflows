@@ -98,6 +98,9 @@ function runCli(options, phase = "prepare", bundle = options.bundle) {
         OPERATION: "deploy",
         DEPLOYMENT_POLICY: JSON.stringify(options.policy),
         ENVIRONMENT_JSON: bundle,
+        ...(options.githubSecrets === undefined
+          ? {}
+          : { ALL_SECRETS: options.githubSecrets }),
       },
     },
   );
@@ -216,6 +219,102 @@ test("malformed bundle parse errors never reveal secret JSON snippets", (t) => {
     result.stdout + result.stderr,
     /super-private-runtime-marker|SERVICE_KEY|oops/,
   );
+});
+
+test("missing and blank bundle secrets fall back only to declared GitHub names", (t) => {
+  const options = fixture(t);
+  const fallback = JSON.stringify({
+    SERVICE_KEY: "standalone-runtime-marker",
+    UNDECLARED: "unrelated-secret-marker",
+    BURNT_CLOUDFLARE_API_TOKEN: "deployment-credential-marker",
+  });
+  for (const value of [undefined, "", " \t\n"]) {
+    const bundle = JSON.parse(options.bundle);
+    if (value === undefined) delete bundle.secrets.SERVICE_KEY;
+    else bundle.secrets.SERVICE_KEY = value;
+    const resolved = validateEnvironmentBundle(
+      JSON.stringify(bundle),
+      options.policy,
+      fallback,
+    );
+    assert.deepEqual(resolved, {
+      vars: bundle.vars,
+      secrets: { SERVICE_KEY: "standalone-runtime-marker" },
+    });
+  }
+  assert.deepEqual(
+    validateEnvironmentBundle(options.bundle, options.policy, fallback),
+    JSON.parse(options.bundle),
+    "a nonempty bundle value takes precedence",
+  );
+});
+
+test("fallback does not repair malformed bundles or missing public vars", (t) => {
+  const options = fixture(t);
+  const original = JSON.parse(options.bundle);
+  const fallback = JSON.stringify({
+    SERVICE_KEY: "standalone-runtime-marker",
+    API_URL: "https://fallback.example.com",
+  });
+  const missingVar = structuredClone(original);
+  delete missingVar.vars.API_URL;
+  for (const bundle of [
+    {},
+    { vars: original.vars },
+    { ...original, secrets: null },
+    missingVar,
+    { ...original, secrets: { UNDECLARED: "unknown-marker" } },
+    ...[null, false, 123, {}, []].map((value) => ({
+      ...original,
+      secrets: { SERVICE_KEY: value },
+    })),
+  ]) {
+    assert.throws(() =>
+      validateEnvironmentBundle(
+        JSON.stringify(bundle),
+        options.policy,
+        fallback,
+      ),
+    );
+  }
+  for (const raw of ["", "not-json"]) {
+    assert.throws(() =>
+      validateEnvironmentBundle(raw, options.policy, fallback),
+    );
+  }
+});
+
+test("unavailable or malformed standalone secrets fail without leaking values", (t) => {
+  const options = fixture(t);
+  const bundle = JSON.parse(options.bundle);
+  bundle.secrets = {};
+  options.bundle = JSON.stringify(bundle);
+  for (const value of [undefined, "", "  ", null, false, 123, {}, []]) {
+    const fallback = value === undefined ? {} : { SERVICE_KEY: value };
+    assert.throws(() =>
+      validateEnvironmentBundle(
+        options.bundle,
+        options.policy,
+        JSON.stringify(fallback),
+      ),
+    );
+  }
+  for (const githubSecrets of [
+    "null",
+    "[]",
+    '{"SERVICE_KEY":"private-marker",oops}',
+  ]) {
+    options.githubSecrets = githubSecrets;
+    const output = path.join(options.runnerTemp, "worker-secrets.json");
+    fs.writeFileSync(output, "stale-private-marker");
+    const result = runCli(options, "secrets");
+    assert.equal(result.status, 1);
+    assert.equal(fs.existsSync(output), false);
+    assert.doesNotMatch(
+      result.stdout + result.stderr,
+      /private-marker|SERVICE_KEY|oops/,
+    );
+  }
 });
 
 test("generated config rejects source overwrite, traversal, symlinks and hardlinks", (t) => {
@@ -355,6 +454,12 @@ test("workflow commands keep secrets out of builds and clean up after deployment
   const helper = fs.readFileSync("scripts/env-json.bundle.mjs", "utf8");
   for (const operation of ["preview", "deploy"]) {
     const options = fixture(t);
+    const bundle = JSON.parse(options.bundle);
+    bundle.secrets = {};
+    options.bundle = JSON.stringify(bundle);
+    options.githubSecrets = JSON.stringify({
+      SERVICE_KEY: "super-private-runtime-marker",
+    });
     fs.mkdirSync(path.join(options.root, ".burnt-workflows/scripts"), {
       recursive: true,
     });
@@ -375,7 +480,12 @@ test("workflow commands keep secrets out of builds and clean up after deployment
         cwd: options.root,
         env: {
           ...env,
-          ...(secret ? { ENVIRONMENT_JSON: options.bundle } : {}),
+          ...(secret
+            ? {
+                ENVIRONMENT_JSON: options.bundle,
+                ALL_SECRETS: options.githubSecrets,
+              }
+            : {}),
         },
         encoding: "utf8",
       });
@@ -498,6 +608,45 @@ test("failed verification materialization removes stale files without exposing v
     () => materializeVerificationSecrets({ ...options, operation: "deploy" }),
     /verificationSecrets is required/,
   );
+});
+
+test("CLI resolves the same fallback for preparation, deploy and scoped verification", (t) => {
+  const options = verificationFixture(t);
+  const bundle = JSON.parse(options.bundle);
+  delete bundle.secrets.METRICS_KEY;
+  options.bundle = JSON.stringify(bundle);
+  options.githubSecrets = JSON.stringify({
+    SERVICE_KEY: "standalone-service-must-not-override",
+    METRICS_KEY: "standalone-metrics-marker",
+    BURNT_CLOUDFLARE_API_TOKEN: "deployment-credential-marker",
+  });
+  for (const phase of ["prepare", "secrets", "verification"]) {
+    const result = runCli(options, phase);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout + result.stderr, "");
+  }
+  const generated = fs.readFileSync(
+    path.join(
+      path.dirname(options.source),
+      options.policy.targets.candidate.wranglerConfig,
+    ),
+    "utf8",
+  );
+  assert.doesNotMatch(generated, /marker|must-not-override/);
+  const secrets = path.join(options.runnerTemp, "worker-secrets.json");
+  const verification = path.join(
+    options.runnerTemp,
+    "worker-verification-secrets.json",
+  );
+  assert.deepEqual(JSON.parse(fs.readFileSync(secrets, "utf8")), {
+    SERVICE_KEY: "super-private-runtime-marker",
+    METRICS_KEY: "standalone-metrics-marker",
+  });
+  assert.deepEqual(JSON.parse(fs.readFileSync(verification, "utf8")), {
+    METRICS_KEY: "standalone-metrics-marker",
+  });
+  for (const output of [secrets, verification])
+    assert.equal(fs.statSync(output).mode & 0o777, 0o600);
 });
 
 test("workflow scoped probe receives only its file and cleanup runs after probe failure", async (t) => {

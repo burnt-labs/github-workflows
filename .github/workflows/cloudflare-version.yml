@@ -130,6 +130,8 @@ jobs:
           DEPLOYMENT_POLICY: ${{ inputs.deployment-policy }}
           TARGET: ${{ inputs.target }}
           ENVIRONMENT_JSON: ${{ secrets[fromJSON(inputs.deployment-policy).environmentSecret] }}
+          # The central helper selects only policy-declared workerSecrets.
+          ALL_SECRETS: ${{ toJSON(secrets) }}
         run: node .burnt-workflows/scripts/env-json.bundle.mjs prepare
       - name: Prepare target configuration
         if: fromJSON(inputs.deployment-policy).targets[inputs.target].commands.prepare != null
@@ -171,6 +173,7 @@ jobs:
           TARGET: ${{ inputs.target }}
           OPERATION: ${{ inputs.operation }}
           ENVIRONMENT_JSON: ${{ secrets[fromJSON(inputs.deployment-policy).environmentSecret] }}
+          ALL_SECRETS: ${{ toJSON(secrets) }}
         run: node .burnt-workflows/scripts/env-json.bundle.mjs secrets
       # D1 migrations declared in the deployment policy apply here, before the
       # new version deploys, so the schema the code was written against exists
@@ -277,6 +280,7 @@ jobs:
           TARGET: ${{ inputs.target }}
           OPERATION: ${{ inputs.operation }}
           ENVIRONMENT_JSON: ${{ secrets[fromJSON(inputs.deployment-policy).environmentSecret] }}
+          ALL_SECRETS: ${{ toJSON(secrets) }}
         run: node .burnt-workflows/scripts/env-json.bundle.mjs verification
       - name: Verify deployment
         if: >-

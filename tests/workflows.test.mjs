@@ -1327,6 +1327,18 @@ test("Cloudflare bundles validate before build and never expose secrets to consu
     publicStep.env.ENVIRONMENT_JSON,
     /secrets\[fromJSON\(inputs.deployment-policy\).environmentSecret\]/,
   );
+  const fallbackSteps = [
+    "Materialize public Worker variables",
+    "Materialize bundled Worker secrets",
+    "Collect verification secrets",
+  ];
+  for (const name of fallbackSteps) {
+    const step = steps[index(name)];
+    assert.equal(step.env.ALL_SECRETS, "${{ toJSON(secrets) }}");
+    assert.match(step.run, /env-json\.bundle\.mjs/);
+  }
+  assert.equal(workflow.jobs.version.env?.ALL_SECRETS, undefined);
+  assert.equal(steps[index("Install")].env, undefined);
   assert.equal(
     publicStep.if,
     "fromJSON(inputs.deployment-policy).environmentSecret != ''",

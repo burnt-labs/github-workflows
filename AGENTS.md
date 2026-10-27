@@ -541,9 +541,11 @@ back to `BURNT_CLOUDFLARE_API_TOKEN`, and fails loudly if neither is present.
 
 A Cloudflare policy may select `environmentSecret`, naming a GitHub Environment
 secret containing exactly `{vars,secrets}`. `workerVariables` and `workerSecrets`
-are exact required allowlists; public values must be strings (empty is allowed),
-secrets nonempty strings. No unknown names, control credentials, overlap,
-coercion or alternate source is accepted. This is Cue's established service
+are exact required allowlists; public values must be strings (empty is allowed).
+Missing or blank bundle secret entries fall back to same-name standalone GitHub
+secrets; nonempty bundle values win. Resolved secrets must be nonempty strings.
+No unknown bundle names, control credentials, overlap or coercion is accepted.
+Public vars and both bundle objects remain required. This is Cue's established service
 bundle shape, with centrally owned validation/materialization rather than
 consumer-owned credential handling.
 

@@ -1321,7 +1321,7 @@ function validateDeploymentPolicy(policy) {
 function object(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
-function validateEnvironmentBundle(raw, policy) {
+function validateEnvironmentBundle(raw, policy, githubSecrets = "{}") {
   let bundle;
   try {
     bundle = JSON.parse(raw);
@@ -1337,6 +1337,23 @@ function validateEnvironmentBundle(raw, policy) {
     throw new Error(
       "Environment bundle must contain only vars and secrets objects",
     );
+  }
+  let fallback;
+  try {
+    fallback = JSON.parse(githubSecrets);
+  } catch {
+    throw new Error("Standalone GitHub secrets are not valid JSON");
+  }
+  if (!object(fallback))
+    throw new Error("Standalone GitHub secrets must be an object");
+  for (const name of policy.workerSecrets) {
+    const value = bundle.secrets[name];
+    if (
+      (!Object.hasOwn(bundle.secrets, name) ||
+        (typeof value === "string" && value.trim() === "")) &&
+      Object.hasOwn(fallback, name)
+    )
+      bundle.secrets[name] = fallback[name];
   }
   for (const [section, names] of [
     ["vars", policy.workerVariables],
@@ -1403,7 +1420,7 @@ function configurationPaths(root, policy, target) {
     throw new Error("Refusing to overwrite source Wrangler configuration");
   return { source, generated: configured };
 }
-function inputs({ policy: rawPolicy, target, bundle, root }) {
+function inputs({ policy: rawPolicy, target, bundle, root, githubSecrets }) {
   const policy = validateDeploymentPolicy(structuredClone(rawPolicy));
   if (!policy.environmentSecret)
     throw new Error("environmentSecret is required for bundle materialization");
@@ -1412,7 +1429,7 @@ function inputs({ policy: rawPolicy, target, bundle, root }) {
   return {
     policy,
     selected: policy.targets[target],
-    values: validateEnvironmentBundle(bundle, policy),
+    values: validateEnvironmentBundle(bundle, policy, githubSecrets),
     root,
   };
 }
@@ -1507,6 +1524,7 @@ try {
     policy: JSON.parse(process.env.DEPLOYMENT_POLICY),
     target: process.env.TARGET,
     bundle: process.env.ENVIRONMENT_JSON,
+    githubSecrets: process.env.ALL_SECRETS,
     root: process.env.GITHUB_WORKSPACE,
     runnerTemp: process.env.RUNNER_TEMP,
     operation: process.env.OPERATION,
