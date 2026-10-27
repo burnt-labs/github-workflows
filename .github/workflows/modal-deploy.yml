@@ -63,7 +63,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: burnt-labs/github-workflows
-          ref: abce8f6f2861dd0f42ba1c1337e46eccca33cd24 # unreleased
+          ref: 14ca01a69b125ac6599eeb4e5c66f7333777bbbe # unreleased
           path: .burnt-workflows
           persist-credentials: false
       - name: Validate reviewed source and policy
@@ -106,7 +106,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: burnt-labs/github-workflows
-          ref: abce8f6f2861dd0f42ba1c1337e46eccca33cd24 # unreleased
+          ref: 14ca01a69b125ac6599eeb4e5c66f7333777bbbe # unreleased
           path: .burnt-workflows
           persist-credentials: false
       - name: Validate reviewed source and policy
