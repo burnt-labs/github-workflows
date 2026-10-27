@@ -14,6 +14,11 @@ Consumers define:
 - `.github/deployment-policy.jsonc` for Cloudflare deployments
 - `.github/npm-policy.jsonc` for npm packages
 - `.github/phala-policy.jsonc` for Phala CVM deployments
+- `.github/modal-policy.jsonc` for reviewed Modal deployments of existing images
+
+Modal's capped schema, credential boundary, exact zk-email-prover migration
+example and release/adoption prerequisites are in [docs/modal.md](docs/modal.md).
+This entrypoint does not make existing consumers adopted or create a release.
 
 Monorepos may keep one policy set per app and pass repository-relative policy
 paths to the reusable workflows. Cloudflare deployment policies and npm

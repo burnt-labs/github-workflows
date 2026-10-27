@@ -85,21 +85,22 @@ These are not preferences. Changes that break them will be rejected.
 
 ## The flows
 
-Eleven workflows. Nine are entry points; two are internal.
+Twelve workflows. Ten are entry points; two are internal.
 
-| Workflow                 | Called by                   | Purpose                                        |
-| ------------------------ | --------------------------- | ---------------------------------------------- |
-| `required-quality.yml`   | org ruleset, and every flow | Validate policies, run the quality gates       |
-| `cloudflare-pr.yml`      | consumer, on `pull_request` | Quality, candidate preview, PR comment         |
-| `cloudflare-main.yml`    | consumer, on push to main   | Quality, candidate deploy, release drafts      |
-| `cloudflare-release.yml` | consumer, on `release`      | Preview or deploy the release target           |
-| `npm-pr.yml`             | consumer, on `pull_request` | Quality, package dry run                       |
-| `npm-main.yml`           | consumer, on push to main   | Publish the candidate dist-tag, release drafts |
-| `npm-release.yml`        | consumer, on `release`      | Publish the release dist-tag                   |
-| `npm-changesets.yml`     | consumer, on push to main   | Changesets version PR, multi-package publish   |
-| `phala-deploy.yml`       | consumer                    | Build and deploy a Phala CVM target            |
-| `cloudflare-version.yml` | internal                    | One `wrangler versions upload` or `deploy`     |
-| `npm-publish.yml`        | internal                    | One `npm publish` via OIDC trusted publishing  |
+| Workflow                 | Called by                   | Purpose                                           |
+| ------------------------ | --------------------------- | ------------------------------------------------- |
+| `required-quality.yml`   | org ruleset, and every flow | Validate policies, run the quality gates          |
+| `cloudflare-pr.yml`      | consumer, on `pull_request` | Quality, candidate preview, PR comment            |
+| `cloudflare-main.yml`    | consumer, on push to main   | Quality, candidate deploy, release drafts         |
+| `cloudflare-release.yml` | consumer, on `release`      | Preview or deploy the release target              |
+| `npm-pr.yml`             | consumer, on `pull_request` | Quality, package dry run                          |
+| `npm-main.yml`           | consumer, on push to main   | Publish the candidate dist-tag, release drafts    |
+| `npm-release.yml`        | consumer, on `release`      | Publish the release dist-tag                      |
+| `npm-changesets.yml`     | consumer, on push to main   | Changesets version PR, multi-package publish      |
+| `phala-deploy.yml`       | consumer                    | Build and deploy a Phala CVM target               |
+| `modal-deploy.yml`       | consumer                    | Deploy a reviewed Modal target and existing image |
+| `cloudflare-version.yml` | internal                    | One `wrangler versions upload` or `deploy`        |
+| `npm-publish.yml`        | internal                    | One `npm publish` via OIDC trusted publishing     |
 
 Consumers never call `cloudflare-version.yml` or `npm-publish.yml` directly.
 
@@ -113,6 +114,21 @@ Phala flows. All are validated by
 Reusable workflow callers may select alternate repository-relative `.jsonc`
 paths through the `quality-policy-path` and product-specific policy-path inputs.
 This is intended for monorepos; omitted inputs retain the root paths above.
+
+### modal-policy.jsonc
+
+Modal deploys existing images through `modal-deploy.yml`; its independently
+validated capped JSONC contract and rollout are in [docs/modal.md](docs/modal.md).
+The platform owns credentials and decisions; target public variable maps keep
+application-specific names declarative. Arbitrary target keys preserve legacy
+apps alongside candidate/release roles without renaming real environments.
+This provider entrypoint is explicitly requested even though only one Modal
+consumer is currently inventoried; do not use it to justify unrelated schema
+knobs. It requires genuine shared quality, accepts only reviewed default-branch
+ancestry on push/dispatch, and exposes Modal credentials only to the final deploy
+import. No consumer rollout or release is implied. Rebuild `modal.bundle.mjs`
+with `pnpm build` and advance the new workflow's tool pins in a separate signed
+commit before releasing.
 
 ### phala-policy.jsonc
 
