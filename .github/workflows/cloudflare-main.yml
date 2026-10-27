@@ -90,7 +90,7 @@ jobs:
     permissions:
       contents: read
       deployments: write
-    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@324440298ac0d377a53b85d73cc738d1d4583336 # unreleased
+    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@444e74a22bee793a239fc29b0d99772ffceeff3f # unreleased
     with:
       # Under single topology the candidate and the release are the same
       # Worker, so deploying here would serve the merge immediately and there
@@ -112,7 +112,7 @@ jobs:
     permissions:
       contents: read
       deployments: write
-    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@324440298ac0d377a53b85d73cc738d1d4583336 # unreleased
+    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@444e74a22bee793a239fc29b0d99772ffceeff3f # unreleased
     with:
       operation: preview
       target: release
@@ -198,7 +198,7 @@ jobs:
     permissions:
       contents: read
       deployments: write
-    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@324440298ac0d377a53b85d73cc738d1d4583336 # unreleased
+    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@444e74a22bee793a239fc29b0d99772ffceeff3f # unreleased
     with:
       operation: deploy
       target: release
