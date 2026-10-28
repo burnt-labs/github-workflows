@@ -449,3 +449,9 @@ The workflow's `deployment-url` output is the boundary for consumer-specific
 orchestration. A caller that needs to store the URL or redeploy another service
 does so in its own downstream job; the reusable workflow never mutates those
 resources itself.
+
+## Frontend builds
+
+Cloudflare consumers can declare target-specific public build inputs and
+checksummed private R2 static assets. See [public frontend build inputs](docs/frontend-build.md)
+for the schema, credential boundary and limits.

@@ -116,7 +116,10 @@ jobs:
       - name: Install
         run: ${{ fromJSON(inputs.quality-policy).commands.install }}
       - name: Checkout central environment tools
-        if: fromJSON(inputs.deployment-policy).environmentSecret != ''
+        if: >-
+          fromJSON(inputs.deployment-policy).environmentSecret != '' ||
+          fromJSON(inputs.deployment-policy).buildAssets != null ||
+          fromJSON(inputs.deployment-policy).targets[inputs.target].buildVariables != null
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: burnt-labs/github-workflows
@@ -131,6 +134,20 @@ jobs:
           TARGET: ${{ inputs.target }}
           ENVIRONMENT_JSON: ${{ secrets[fromJSON(inputs.deployment-policy).environmentSecret] }}
         run: node .burnt-workflows/scripts/env-json.bundle.mjs prepare
+      - name: Prepare public frontend build inputs
+        if: >-
+          fromJSON(inputs.deployment-policy).buildAssets != null ||
+          fromJSON(inputs.deployment-policy).targets[inputs.target].buildVariables != null
+        working-directory: ${{ github.workspace }}
+        env:
+          DEPLOYMENT_POLICY: ${{ inputs.deployment-policy }}
+          TARGET: ${{ inputs.target }}
+          VERSION_TAG: ${{ inputs.version-tag }}
+          BUILD_VARIABLES: ${{ toJSON(vars) }}
+          BUILD_SECRETS: ${{ toJSON(secrets) }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.cloudflare-account-id || secrets.BURNT_CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.cloudflare-api-token || secrets.BURNT_CLOUDFLARE_API_TOKEN }}
+        run: node .burnt-workflows/scripts/frontend-build.bundle.mjs
       - name: Prepare target configuration
         if: fromJSON(inputs.deployment-policy).targets[inputs.target].commands.prepare != null
         working-directory: ${{ fromJSON(inputs.deployment-policy).workingDirectory }}
