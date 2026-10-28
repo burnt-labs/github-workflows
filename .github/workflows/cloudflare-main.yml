@@ -69,6 +69,10 @@ jobs:
           gh api --paginate "repos/${{ github.repository }}/releases?per_page=100" \
             --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name' \
             > "$RUNNER_TEMP/release-tags.txt"
+          # A failed legacy deployment may leave a tag without a release.
+          # Reserve those versions too: --target never moves an existing tag.
+          gh api --paginate "repos/${{ github.repository }}/tags?per_page=100" \
+            --jq '.[].name' >> "$RUNNER_TEMP/release-tags.txt"
       - id: metadata
         env:
           GITHUB_RUN_NUMBER: ${{ github.run_number }}

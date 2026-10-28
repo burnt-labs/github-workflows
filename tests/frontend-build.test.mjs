@@ -326,3 +326,35 @@ test("oversized asset responses fail before any writes", async (t) => {
   );
   assert.equal(fs.existsSync(path.join(root, "public")), false);
 });
+
+test("main metadata reserves orphan stable tags from earlier failed deployments", (t) => {
+  const root = fixture(t);
+  const gh = path.join(root, "gh");
+  fs.writeFileSync(
+    gh,
+    '#!/bin/sh\ncase "$*" in\n  *releases*) echo v18.2.1 ;;\n  *tags*) echo v18.2.2 ;;\n  *) exit 1 ;;\nesac\n',
+    { mode: 0o755 },
+  );
+  const workflow = parse(
+    fs.readFileSync(".github/workflows/cloudflare-main.yml", "utf8"),
+  );
+  const step = workflow.jobs.metadata.steps.find(
+    (step) => step.name === "Read stable release tags",
+  );
+  const command = step.run.replaceAll(
+    "${{ github.repository }}",
+    "example/app",
+  );
+  const result = spawnSync("bash", ["-e", "-c", command], {
+    env: { PATH: `${root}:${process.env.PATH}`, RUNNER_TEMP: root },
+    encoding: "utf8",
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(
+    fs
+      .readFileSync(path.join(root, "release-tags.txt"), "utf8")
+      .trim()
+      .split("\n"),
+    ["v18.2.1", "v18.2.2"],
+  );
+});
