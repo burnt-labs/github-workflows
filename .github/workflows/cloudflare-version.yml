@@ -123,7 +123,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: burnt-labs/github-workflows
-          ref: 3f4ab41b6da83ebd6a4c8993615e906b891f2745 # unreleased
+          ref: be9aa8956304fe9ae41df9d7ccb62ba0d518afcf # unreleased
           path: .burnt-workflows
           persist-credentials: false
       - name: Materialize public Worker variables
