@@ -74,7 +74,7 @@ jobs:
 
   quality:
     needs: policy
-    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@1ac7d0c010c242d1ff97c3d9baaded8d77609428 # unreleased
+    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@18ac34fe76ba39f6712cb9a6e503ad3cf5e57949 # unreleased
 
   deploy:
     name: Phala ${{ inputs.target }}
