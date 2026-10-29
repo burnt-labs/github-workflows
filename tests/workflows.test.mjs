@@ -357,7 +357,11 @@ test("Phala deployment is serialized and updates CVMs by id", () => {
   );
   const source = fs.readFileSync(`${directory}/phala-deploy.yml`, "utf8");
   assert.match(workflow.jobs.deploy.concurrency.group, /cvmName/);
-  assert.equal(workflow.jobs.deploy.concurrency["cancel-in-progress"], true);
+  assert.equal(workflow.on.workflow_call.inputs.operation.default, "deploy");
+  assert.equal(
+    workflow.jobs.deploy.concurrency["cancel-in-progress"],
+    "${{ inputs.operation == 'deploy' }}",
+  );
   assert.match(source, /existing_id=/);
   assert.match(source, /target=\(--cvm-id "\$existing_id"\)/);
   assert.match(source, /has no valid app id/);
@@ -408,6 +412,14 @@ test("Phala never creates the release CVM", (t) => {
     { role: "release", items: [cvm("service-production-old", "a")], status: 1 },
     { role: "release", items: [cvm("service-production", "b")], status: 0 },
     { role: "candidate", items: [], status: 0 },
+    { role: "candidate", operation: "update", items: [], status: 1 },
+    {
+      role: "candidate",
+      operation: "update",
+      items: [cvm("service-production", "b")],
+      status: 0,
+    },
+    { role: "release", operation: "update", items: [], status: 1 },
     { role: "candidate", items: [cvm("service-production", "c")], status: 0 },
     {
       role: "release",
@@ -435,7 +447,10 @@ test("Phala never creates the release CVM", (t) => {
     // Anything that is not the candidate role is refused creation too.
     { role: "", items: [], status: 1 },
   ];
-  for (const [index, { role, items, status }] of cases.entries()) {
+  for (const [
+    index,
+    { role, operation = "deploy", items, status },
+  ] of cases.entries()) {
     const label = `${role || "(empty)"} with ${JSON.stringify(items)}`;
     const fixture = path.join(root, `cvms-${index}.json`);
     const deployLog = path.join(root, `deploy-${index}.log`);
@@ -449,6 +464,7 @@ test("Phala never creates the release CVM", (t) => {
         RUNNER_TEMP: root,
         WORKING_DIRECTORY: root,
         TARGET_ROLE: role,
+        PHALA_OPERATION: operation,
         CVM_NAME: "service-production",
         COMPOSE_FILE: path.join(root, "compose.yaml"),
         FIXTURE: fixture,
@@ -1383,4 +1399,58 @@ test("authenticated probes receive only a late scoped file and always remove it"
     index("Verify deployment with scoped secrets") <
       index("Remove verification secrets file"),
   );
+});
+
+test("Phala setup rejects automatic events and feature branches before policy or credentials", () => {
+  const workflow = parse(
+    fs.readFileSync(`${directory}/phala-deploy.yml`, "utf8"),
+  );
+  const validate = workflow.jobs.validate.steps.find(
+    (step) => step.name === "Validate operation",
+  );
+  for (const [operation, event, ref, expected] of [
+    ["deploy", "push", "refs/heads/main", 0],
+    ["update", "workflow_dispatch", "refs/heads/main", 0],
+    ["setup", "workflow_dispatch", "refs/heads/main", 0],
+    ["setup", "push", "refs/heads/main", 1],
+    ["setup", "workflow_dispatch", "refs/heads/feature", 1],
+    ["setup", "pull_request_target", "refs/heads/main", 1],
+    ["unknown", "workflow_dispatch", "refs/heads/main", 1],
+  ]) {
+    const result = spawnSync("bash", ["-euo", "pipefail", "-c", validate.run], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PHALA_OPERATION: operation,
+        GITHUB_EVENT_NAME: event,
+        GITHUB_REF: ref,
+        DEFAULT_BRANCH: "main",
+      },
+    });
+    assert.equal(
+      result.status,
+      expected,
+      `${operation}/${event}/${ref}: ${result.stderr}`,
+    );
+  }
+  const steps = workflow.jobs.deploy.steps;
+  const preflight = steps.findIndex(
+    (step) => step.name === "Validate initial setup before image publication",
+  );
+  const build = steps.findIndex((step) => step.name === "Build and push image");
+  assert(preflight > 0 && preflight < build);
+  const create = steps.find((step) => step.name === "Create the first CVM");
+  assert.equal(create.if, "inputs.operation == 'setup'");
+  assert.equal(
+    steps.find((step) => step.name === "Deploy CVM").if,
+    "inputs.operation != 'setup'",
+  );
+  const upload = steps.find(
+    (step) =>
+      step.name === "Preserve public setup identity on success or failure",
+  );
+  assert.match(upload.if, /always\(\).*setup/);
+  assert.equal(upload.with.path, "${{ runner.temp }}/phala-setup.json");
+  assert.equal(steps.at(-1).if, "${{ always() }}");
+  assert.match(steps.at(-1).run, /rm -f.*phala-api-key.*phala.env/);
 });
