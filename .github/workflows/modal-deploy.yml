@@ -1,0 +1,128 @@
+name: Burnt Modal Deploy
+
+on:
+  workflow_call:
+    inputs:
+      target:
+        description: Exact target key from the Modal policy
+        required: true
+        type: string
+      image-tag:
+        description: Required existing registry image tag; never defaults to latest
+        required: true
+        type: string
+      modal-policy-path:
+        description: Repository-relative Modal JSONC policy
+        default: .github/modal-policy.jsonc
+        required: false
+        type: string
+      quality-policy-path:
+        description: Repository-relative policy with seven genuine quality commands
+        default: .github/quality-policy.jsonc
+        required: false
+        type: string
+    secrets:
+      MODAL_TOKEN_ID:
+        required: false
+      MODAL_TOKEN_SECRET:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  policy:
+    name: Modal policy and reviewed source
+    runs-on: ubicloud-standard-2
+    outputs:
+      plan: ${{ steps.policy.outputs.plan }}
+    env:
+      MODAL_POLICY_PATH: ${{ inputs.modal-policy-path }}
+      MODAL_TARGET: ${{ inputs.target }}
+      MODAL_IMAGE_TAG: ${{ inputs.image-tag }}
+      SOURCE_EVENT: ${{ github.event_name }}
+      SOURCE_REF: ${{ github.ref }}
+      SOURCE_SHA: ${{ github.sha }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+    steps:
+      - name: Reject non-deployment events before checkout
+        run: |
+          case "$SOURCE_EVENT" in
+            push|workflow_dispatch) ;;
+            *) echo '::error::Modal requires push or workflow_dispatch, never PR events'; exit 1 ;;
+          esac
+      - name: Checkout exact source and default-branch history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Reserve central tools directory
+        run: test ! -e .burnt-workflows && test ! -L .burnt-workflows
+      - name: Checkout central Modal tools
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: burnt-labs/github-workflows
+          ref: 14ca01a69b125ac6599eeb4e5c66f7333777bbbe # unreleased
+          path: .burnt-workflows
+          persist-credentials: false
+      - name: Validate reviewed source and policy
+        id: policy
+        run: node .burnt-workflows/scripts/modal.bundle.mjs plan
+
+  quality:
+    needs: policy
+    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@abce8f6f2861dd0f42ba1c1337e46eccca33cd24 # v1.8.0
+    with:
+      quality-policy-path: ${{ inputs.quality-policy-path }}
+
+  deploy:
+    name: Modal ${{ inputs.target }}
+    needs: [policy, quality]
+    runs-on: ubicloud-standard-4
+    environment:
+      name: ${{ fromJSON(needs.policy.outputs.plan).githubEnvironment }}
+    concurrency:
+      group: burnt-modal-${{ github.repository }}-${{ inputs.modal-policy-path }}-${{ inputs.target }}
+      cancel-in-progress: false
+    env:
+      MODAL_POLICY_PATH: ${{ inputs.modal-policy-path }}
+      MODAL_TARGET: ${{ inputs.target }}
+      MODAL_IMAGE_TAG: ${{ inputs.image-tag }}
+      SOURCE_EVENT: ${{ github.event_name }}
+      SOURCE_REF: ${{ github.ref }}
+      SOURCE_SHA: ${{ github.sha }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+    steps:
+      - name: Checkout exact source and default-branch history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Reserve central tools directory
+        run: test ! -e .burnt-workflows && test ! -L .burnt-workflows
+      - name: Checkout central Modal tools
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: burnt-labs/github-workflows
+          ref: 14ca01a69b125ac6599eeb4e5c66f7333777bbbe # unreleased
+          path: .burnt-workflows
+          persist-credentials: false
+      - name: Validate reviewed source and policy
+        run: node .burnt-workflows/scripts/modal.bundle.mjs plan
+      - name: Setup Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: ${{ fromJSON(needs.policy.outputs.plan).pythonVersion }}
+      - name: Install pinned Modal SDK
+        # No consumer requirements, install/build hooks, or deployment tokens.
+        run: |
+          python -m venv "$RUNNER_TEMP/modal-venv"
+          "$RUNNER_TEMP/modal-venv/bin/python" -m pip --isolated install --only-binary=:all: modal==1.6.3
+      - name: Deploy Modal
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+          MODAL_PYTHON: ${{ runner.temp }}/modal-venv/bin/python
+        run: node .burnt-workflows/scripts/modal.bundle.mjs deploy

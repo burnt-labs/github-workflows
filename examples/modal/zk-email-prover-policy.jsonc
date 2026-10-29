@@ -1,0 +1,44 @@
+{
+  // Migration declaration only: not installed in the consumer by this PR.
+  "schemaVersion": 1,
+  "workingDirectory": ".",
+  "entrypoint": "modal_app.py",
+  "pythonVersion": "3.11",
+  "image": {
+    "repository": "docker.io/burntlabs/zk-email-prover",
+    "repositoryVariable": "DOCKER_REPO",
+    "tagVariable": "DOCKER_TAG",
+  },
+  "targets": {
+    "legacy": {
+      "githubEnvironment": "testnet",
+      "variables": {
+        "MODAL_APP_NAME": "zk-gpu-prover",
+        "MODAL_STORAGE_VOLUME": "zk-prover-artifacts",
+        "GPU_TYPE": "H100:2",
+        "SCALEDOWN_WINDOW": "900",
+        "TIMEOUT": "60",
+      },
+    },
+    "mainnet": {
+      "githubEnvironment": "mainnet",
+      "variables": {
+        "MODAL_APP_NAME": "zk-email-prover-mainnet",
+        "MODAL_STORAGE_VOLUME": "zk-prover-artifacts-mainnet",
+        "GPU_TYPE": "H100:2",
+        "SCALEDOWN_WINDOW": "900",
+        "TIMEOUT": "300",
+      },
+    },
+    "testnet": {
+      "githubEnvironment": "testnet",
+      "variables": {
+        "MODAL_APP_NAME": "zk-email-prover-testnet",
+        "MODAL_STORAGE_VOLUME": "zk-prover-artifacts-testnet",
+        "GPU_TYPE": "H100:2",
+        "SCALEDOWN_WINDOW": "300",
+        "TIMEOUT": "300",
+      },
+    },
+  },
+}
