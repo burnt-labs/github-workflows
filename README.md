@@ -444,8 +444,9 @@ jobs:
 Existing callers do not need to change their policy or inputs. Omitting
 `operation` keeps `deploy`: candidate auto-creation and release update-only
 behavior, the existing CLI and runtime configuration, and the same output.
-`operation: update` refuses creation for either target. Both modes keep the
-existing deployment path; neither requires the new setup policy.
+`operation: update` refuses creation for either target and opts into the guarded
+modern path. Like setup, it requires a manual default-branch call and explicit
+infrastructure, either static `setup` or a declared `configuration` bundle.
 
 `operation: setup` creates an absent candidate **or release** CVM. It only runs
 from a manual `workflow_dispatch` on the caller's default branch, behind the
@@ -464,7 +465,7 @@ infrastructure explicitly in that target's policy:
 These are example values, not runtime defaults; choose the approved platform
 image, instance and region for the service. Setup disables development OS,
 public logs, public system information and listing. It uses the pinned Phala
-CLI 1.1.22 / API 2026-06-23; existing deploy/update calls retain CLI 1.1.20.
+CLI 1.1.22 / API 2026-06-23 for explicit operations; default deploy calls retain CLI 1.1.20.
 
 The consumer's manual trigger stays thin:
 

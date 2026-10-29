@@ -66,7 +66,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: burnt-labs/github-workflows
-          ref: 0854b15da7459ad18ca892027792dae970b7bf07 # unreleased
+          ref: fb985d64a0a97b69ffb51598ce5e75bb01234fd0 # unreleased
           path: .burnt-workflows
       - id: policy
         name: Require and validate Phala policy
@@ -106,7 +106,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: burnt-labs/github-workflows
-          ref: 0854b15da7459ad18ca892027792dae970b7bf07 # unreleased
+          ref: fb985d64a0a97b69ffb51598ce5e75bb01234fd0 # unreleased
           path: .burnt-phala-tools
           persist-credentials: false
       - name: Move setup tooling outside the image build context
@@ -400,7 +400,7 @@ jobs:
         if: ${{ always() && inputs.operation != 'deploy' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: phala-setup-${{ inputs.target }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: phala-${{ inputs.operation }}-${{ inputs.target }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/phala-setup.json
           if-no-files-found: ignore
           retention-days: 30
