@@ -1439,6 +1439,19 @@ test("Phala setup rejects automatic events and feature branches before policy or
   );
   const build = steps.findIndex((step) => step.name === "Build and push image");
   assert(preflight > 0 && preflight < build);
+  const move = steps.findIndex(
+    (step) =>
+      step.name === "Move setup tooling outside the image build context",
+  );
+  assert(move > 0 && move < preflight);
+  assert.match(steps[move].run, /mv .burnt-phala-tools/);
+  assert.equal(
+    steps.find((step) => step.name === "Checkout central setup tools").with[
+      "persist-credentials"
+    ],
+    false,
+  );
+  assert.match(steps[preflight].run, /RUNNER_TEMP/);
   const create = steps.find((step) => step.name === "Create the first CVM");
   assert.equal(create.if, "inputs.operation == 'setup'");
   assert.equal(
