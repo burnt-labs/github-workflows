@@ -150,6 +150,14 @@ jobs:
             Object.assign(variables, resolved.values);
             fs.writeFileSync(`${process.env.RUNNER_TEMP}/phala-target.json`, JSON.stringify({ ...resolved.target, publicValues: resolved.values }), { mode: 0o600 });
           }
+          // Default deploys retain legacy per-key variables; bundles are for setup/update.
+          const useConfiguration = (process.env.PHALA_OPERATION || "deploy") !== "deploy" && target.configuration;
+          if (useConfiguration) {
+            const { resolveTargetConfiguration } = await import(`${process.env.RUNNER_TEMP}/burnt-phala-tools/scripts/phala-configuration.mjs`);
+            const resolved = resolveTargetConfiguration(target, secrets[target.configuration.secret], JSON.parse(process.env.RUNTIME_VARIABLES));
+            Object.assign(variables, resolved.values);
+            fs.writeFileSync(`${process.env.RUNNER_TEMP}/phala-target.json`, JSON.stringify({ ...resolved.target, publicValues: resolved.values }), { mode: 0o600 });
+          }
           const apiKey = secrets[process.env.API_KEY_NAME];
           const registryPassword = secrets[process.env.REGISTRY_PASSWORD_NAME];
           const missing = [
@@ -164,7 +172,7 @@ jobs:
           }
           const environment = Object.fromEntries([
             ...secretNames.map((name) => [name, secrets[name]]),
-            ...(!target.configuration ? variableNames.map((name) => [name, variables[name]]) : []),
+            ...(!useConfiguration ? variableNames.map((name) => [name, variables[name]]) : []),
             ["DSTACK_DOCKER_REGISTRY", "ghcr.io"],
             ["DSTACK_DOCKER_USERNAME", process.env.REGISTRY_USERNAME],
             ["DSTACK_DOCKER_PASSWORD", registryPassword],
