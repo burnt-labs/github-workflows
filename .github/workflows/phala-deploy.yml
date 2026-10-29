@@ -60,7 +60,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: burnt-labs/github-workflows
-          ref: d7e4d93a212430e14a60f811f6bb07e7e93d1c98 # v1.7.0
+          ref: 0854b15da7459ad18ca892027792dae970b7bf07 # unreleased
           path: .burnt-workflows
       - id: policy
         name: Require and validate Phala policy
@@ -98,7 +98,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: burnt-labs/github-workflows
-          ref: c96eb87b21cdbfd88f7402cd636801dadea2aa5f # unreleased
+          ref: 0854b15da7459ad18ca892027792dae970b7bf07 # unreleased
           path: .burnt-phala-tools
       - name: Resolve image
         id: image
