@@ -1104,6 +1104,24 @@ function validateBuildInputs({ buildVariables, buildAssets } = {}) {
   }
 }
 
+// scripts/phala-setup.mjs
+function check(condition, message) {
+  if (!condition) throw new Error(message);
+}
+function validateInfrastructure(value) {
+  check(
+    value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      Object.keys(value).sort().join(",") === "instanceType,osImage,region" &&
+      /^dstack-\d+\.\d+\.\d+$/.test(value.osImage ?? "") &&
+      /^tdx\.[a-z0-9.-]+$/.test(value.instanceType ?? "") &&
+      /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value.region ?? ""),
+    "Explicit Phala setup infrastructure requires osImage, instanceType and lowercase region",
+  );
+  return value;
+}
+
 // scripts/policy.mjs
 var QUALITY_PATH = ".github/quality-policy.jsonc";
 var DEPLOYMENT_PATH = ".github/deployment-policy.jsonc";
@@ -1642,6 +1660,7 @@ function validatePhalaPolicy(policy) {
       `Phala targets.${role}.githubEnvironment`,
     );
     requireString(target.cvmName, `Phala targets.${role}.cvmName`);
+    if (target.setup !== void 0) validateInfrastructure(target.setup);
     if (target.publicUrl !== void 0) {
       requireString(target.publicUrl, `Phala targets.${role}.publicUrl`);
       let url;

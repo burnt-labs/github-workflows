@@ -366,9 +366,10 @@ pnpm 10 already default-denies build scripts, so pnpm consumers see no change.
 the repository's quality gates, builds a commit-addressed private GHCR image,
 deploys or updates the selected Phala CVM, resolves and health-checks its public
 HTTPS endpoint, and returns that URL to the caller. Only the candidate CVM is
-created when missing; the release CVM must already exist (provision it by hand
-once), and a release deploy that finds no CVM of that name fails rather than
-creating one. It does not know about a
+created when missing under the default `operation: deploy`; the release CVM
+must already exist, and a release deploy that finds no CVM of that name fails
+rather than creating one. Explicit first-time creation is a separate opt-in
+`operation: setup`, described below. It does not know about a
 consumer's service names, secret bundle format, GitHub variables, or dependent
 workflows.
 
@@ -432,6 +433,78 @@ jobs:
       target: ${{ inputs.target || 'candidate' }}
     secrets: inherit
 ```
+
+### Explicit setup and update-only calls
+
+Existing callers do not need to change their policy or inputs. Omitting
+`operation` keeps `deploy`: candidate auto-creation and release update-only
+behavior, the existing CLI and runtime configuration, and the same output.
+`operation: update` refuses creation for either target. Both modes keep the
+existing deployment path; neither requires the new setup policy.
+
+`operation: setup` creates an absent candidate **or release** CVM. It only runs
+from a manual `workflow_dispatch` on the caller's default branch, behind the
+selected target's existing GitHub Environment protection. Creating a CVM starts
+application code. Do not dispatch it during a deployment freeze. Declare the
+infrastructure explicitly in that target's policy:
+
+```jsonc
+"setup": {
+  "osImage": "dstack-0.6.1",
+  "instanceType": "tdx.small",
+  "region": "us-west-1",
+},
+```
+
+These are example values, not runtime defaults; choose the approved platform
+image, instance and region for the service. Setup disables development OS,
+public logs, public system information and listing. It uses the pinned Phala
+CLI 1.1.22 / API 2026-06-23; existing deploy/update calls retain CLI 1.1.20.
+
+The consumer's manual trigger stays thin:
+
+```yaml
+name: Initial Phala setup
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        type: choice
+        options: [candidate, release]
+        required: true
+permissions:
+  contents: read
+  deployments: write
+  packages: write
+jobs:
+  setup:
+    uses: burnt-labs/github-workflows/.github/workflows/phala-deploy.yml@<sha> # vX.Y.Z
+    with:
+      target: ${{ inputs.target }}
+      operation: setup
+    secrets: inherit
+```
+
+Setup reads every page of raw app inventory, including apps with no current VM
+and retained VM names, before image publication and again before creation.
+Any matching identity requires recovery rather than another creation. Invalid,
+changing, incomplete or unavailable inventories fail closed. There is no
+implicit delete, recreate or retry of a creation request.
+
+The public `phala-setup-<target>-<run>-<attempt>` artifact records the returned
+app/VM IDs, immutable image, source revision and requested infrastructure before
+readiness polling. A timeout or failed health check retains a `pending` receipt;
+only successful VM posture checks and HTTP health mark it `ready`. Artifact
+upload and credential cleanup run after failure too. Preflight failures produce
+no receipt. If creation fails before returning a valid identity, inspect the
+platform inventory before retrying. Receipts contain no runtime credentials.
+These checks establish deployment identity and availability, not attestation
+verification; relying-party enrollment remains separate.
+
+Setup and updates share the existing per-CVM concurrency group. Explicit setup
+and update-only runs queue instead of canceling active work. Legacy `deploy`
+calls retain their cancellation behavior, so pause automatic deployments while
+performing first-time setup. No consumer pins are advanced automatically.
 
 `image.composeVariable` is substituted into the compose file before the deploy,
 by digest, so the compose hash dstack measures names the exact image running. It

@@ -805,3 +805,25 @@ test("verification credentials are a bounded bundle-only subset with a probe", (
     assert.throws(() => validateDeploymentPolicy(copy));
   }
 });
+
+test("Phala setup infrastructure is optional for existing callers but explicit when declared", () => {
+  const policy = phalaPolicy();
+  assert.deepEqual(validatePhalaPolicy(structuredClone(policy)), policy);
+  policy.targets.release.setup = {
+    osImage: "dstack-0.6.1",
+    instanceType: "tdx.small",
+    region: "us-west-1",
+  };
+  assert.deepEqual(validatePhalaPolicy(structuredClone(policy)), policy);
+  for (const setup of [
+    null,
+    {},
+    { ...policy.targets.release.setup, region: "US-WEST-1" },
+    { ...policy.targets.release.setup, osImage: "latest" },
+    { ...policy.targets.release.setup, extra: true },
+  ]) {
+    const invalid = structuredClone(policy);
+    invalid.targets.release.setup = setup;
+    assert.throws(() => validatePhalaPolicy(invalid), /setup infrastructure/);
+  }
+});

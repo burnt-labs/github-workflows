@@ -3,6 +3,7 @@ import path from "node:path";
 import process from "node:process";
 import { parse, printParseErrorCode } from "jsonc-parser";
 import { validateBuildInputs } from "./frontend-build.mjs";
+import { validateInfrastructure } from "./phala-setup.mjs";
 
 const QUALITY_PATH = ".github/quality-policy.jsonc";
 const DEPLOYMENT_PATH = ".github/deployment-policy.jsonc";
@@ -634,6 +635,7 @@ export function validatePhalaPolicy(policy) {
       `Phala targets.${role}.githubEnvironment`,
     );
     requireString(target.cvmName, `Phala targets.${role}.cvmName`);
+    if (target.setup !== undefined) validateInfrastructure(target.setup);
     if (target.publicUrl !== undefined) {
       requireString(target.publicUrl, `Phala targets.${role}.publicUrl`);
       let url;

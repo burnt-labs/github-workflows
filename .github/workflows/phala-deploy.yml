@@ -7,6 +7,11 @@ on:
         description: Semantic deployment target (candidate or release)
         required: true
         type: string
+      operation:
+        description: deploy preserves candidate auto-creation; update requires an existing CVM; setup explicitly creates an absent CVM
+        required: false
+        default: deploy
+        type: string
     outputs:
       deployment-url:
         description: Public HTTPS endpoint that passed the health check (the target's publicUrl when set, otherwise the one Phala reports)
@@ -26,6 +31,22 @@ jobs:
           echo "::error::target must be candidate or release"
           exit 1
 
+      - name: Validate operation
+        env:
+          PHALA_OPERATION: ${{ inputs.operation }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          case "$PHALA_OPERATION" in
+            deploy|update) ;;
+            setup)
+              if [ "$GITHUB_EVENT_NAME" != workflow_dispatch ] || [ -z "$DEFAULT_BRANCH" ] || [ "$GITHUB_REF" != "refs/heads/$DEFAULT_BRANCH" ]; then
+                echo "::error::setup requires a manual run from the caller's default branch"
+                exit 1
+              fi
+              ;;
+            *) echo "::error::operation must be deploy, update or setup"; exit 1 ;;
+          esac
+
   policy:
     name: Phala policy
     needs: validate
@@ -39,7 +60,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: burnt-labs/github-workflows
-          ref: d7e4d93a212430e14a60f811f6bb07e7e93d1c98 # v1.7.0
+          ref: 0854b15da7459ad18ca892027792dae970b7bf07 # unreleased
           path: .burnt-workflows
       - id: policy
         name: Require and validate Phala policy
@@ -47,7 +68,7 @@ jobs:
 
   quality:
     needs: policy
-    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@69582ace4ab106c8d0463b072aaeaedb95b017bd # unreleased
+    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@1ac7d0c010c242d1ff97c3d9baaded8d77609428 # unreleased
 
   deploy:
     name: Phala ${{ inputs.target }}
@@ -58,7 +79,7 @@ jobs:
       url: ${{ steps.phala-url.outputs.deployment-url }}
     concurrency:
       group: phala-${{ github.repository }}-${{ fromJSON(needs.policy.outputs.phala).targets[inputs.target].cvmName }}
-      cancel-in-progress: true
+      cancel-in-progress: ${{ inputs.operation == 'deploy' }}
     permissions:
       contents: read
       deployments: write
@@ -72,6 +93,19 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: lts/*
+      - name: Checkout central setup tools
+        if: inputs.operation == 'setup'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: burnt-labs/github-workflows
+          ref: 0854b15da7459ad18ca892027792dae970b7bf07 # unreleased
+          path: .burnt-phala-tools
+          persist-credentials: false
+      - name: Move setup tooling outside the image build context
+        if: inputs.operation == 'setup'
+        run: |
+          test ! -e "$RUNNER_TEMP/burnt-phala-tools"
+          mv .burnt-phala-tools "$RUNNER_TEMP/burnt-phala-tools"
       - name: Resolve image
         id: image
         env:
@@ -136,6 +170,13 @@ jobs:
               exit 1
               ;;
           esac
+      - name: Validate initial setup before image publication
+        if: inputs.operation == 'setup'
+        env:
+          PHALA_POLICY: ${{ needs.policy.outputs.phala }}
+          TARGET_ROLE: ${{ inputs.target }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: node "$RUNNER_TEMP/burnt-phala-tools/scripts/phala-setup-cli.mjs" preflight
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Login to GHCR for push
@@ -201,14 +242,29 @@ jobs:
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `file=${target}\n`);
           process.stdout.write(`Deploying ${reference}\n`);
           NODE
-      # Only a candidate CVM is created on a miss. A release CVM carries
+      # Ordinary deploys only create candidates on a miss. Explicit manual setup
+      # is separate and refuses any matching app, including pending identities.
+      # A release CVM carries
       # identity that lives outside this flow: DNS that names its app id, and
       # relying-party allowlists that name its measurements. Creating a new one
       # because the named CVM was deleted or renamed would deploy an instance
       # none of that points at, and report success. A release target is
-      # provisioned by hand once, then only ever updated by id here.
-      - name: Deploy CVM
+      # provisioned explicitly once, then only ever updated by id on deploy.
+      - name: Create the first CVM
+        if: inputs.operation == 'setup'
+        timeout-minutes: 45
         env:
+          PHALA_POLICY: ${{ needs.policy.outputs.phala }}
+          TARGET_ROLE: ${{ inputs.target }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          IMAGE_REPOSITORY: ${{ steps.image.outputs.repository }}
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+          COMPOSE_FILE: ${{ steps.compose.outputs.file }}
+        run: node "$RUNNER_TEMP/burnt-phala-tools/scripts/phala-setup-cli.mjs" create
+      - name: Deploy CVM
+        if: inputs.operation != 'setup'
+        env:
+          PHALA_OPERATION: ${{ inputs.operation }}
           TARGET_ROLE: ${{ inputs.target }}
           CVM_NAME: ${{ fromJSON(needs.policy.outputs.phala).targets[inputs.target].cvmName }}
           COMPOSE_FILE: ${{ steps.compose.outputs.file }}
@@ -235,7 +291,7 @@ jobs:
             # The CLI resolves app_<id> to the existing CVM; never use -n here.
             existing_id="app_$existing_app_id"
             target=(--cvm-id "$existing_id")
-          elif [ "$TARGET_ROLE" = "candidate" ]; then
+          elif [ "$TARGET_ROLE" = "candidate" ] && [ "${PHALA_OPERATION:-deploy}" = "deploy" ]; then
             target=(-n "$CVM_NAME")
           else
             echo "::error::No Phala CVM is named $CVM_NAME. The $TARGET_ROLE target is never created by this workflow; provision it by hand, or restore the name, then rerun"
@@ -252,7 +308,15 @@ jobs:
         env:
           CVM_NAME: ${{ fromJSON(needs.policy.outputs.phala).targets[inputs.target].cvmName }}
           PUBLIC_URL: ${{ fromJSON(needs.policy.outputs.phala).targets[inputs.target].publicUrl }}
+          PHALA_OPERATION: ${{ inputs.operation }}
+          PHALA_POLICY: ${{ needs.policy.outputs.phala }}
+          TARGET_ROLE: ${{ inputs.target }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
+          if [ "$PHALA_OPERATION" = setup ]; then
+            node "$RUNNER_TEMP/burnt-phala-tools/scripts/phala-setup-cli.mjs" url
+            exit 0
+          fi
           # A target that terminates TLS inside the CVM (dstack-ingress, TLS
           # passthrough) is not reachable at the URL Phala reports: that one
           # expects the gateway to terminate TLS. Such a target names the URL it
@@ -288,3 +352,21 @@ jobs:
           done
           echo "::error::Phala deployment health check failed after 30 attempts"
           exit 1
+      - name: Mark initial setup healthy
+        if: inputs.operation == 'setup'
+        env:
+          PHALA_POLICY: ${{ needs.policy.outputs.phala }}
+          TARGET_ROLE: ${{ inputs.target }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: node "$RUNNER_TEMP/burnt-phala-tools/scripts/phala-setup-cli.mjs" ready
+      - name: Preserve public setup identity on success or failure
+        if: ${{ always() && inputs.operation == 'setup' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: phala-setup-${{ inputs.target }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/phala-setup.json
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: Remove temporary deployment credentials
+        if: ${{ always() }}
+        run: rm -f "$RUNNER_TEMP/phala-api-key" "$RUNNER_TEMP/phala.env"
