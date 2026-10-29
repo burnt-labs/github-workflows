@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   quality:
-    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@324440298ac0d377a53b85d73cc738d1d4583336 # unreleased
+    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@69582ace4ab106c8d0463b072aaeaedb95b017bd # unreleased
 
   metadata:
     needs: quality

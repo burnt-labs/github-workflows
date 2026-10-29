@@ -1,12 +1,12 @@
 /* eslint-disable */
 
 // scripts/policy-cli.mjs
-import process2 from "node:process";
+import process3 from "node:process";
 
 // scripts/policy.mjs
 import fs from "node:fs";
 import path from "node:path";
-import process from "node:process";
+import process2 from "node:process";
 
 // node_modules/.pnpm/jsonc-parser@3.3.1/node_modules/jsonc-parser/lib/esm/impl/scanner.js
 function createScanner(text, ignoreTrivia = false) {
@@ -494,10 +494,10 @@ function parse(text, errors = [], options = ParseOptions.DEFAULT) {
   }
   const visitor = {
     onObjectBegin: () => {
-      const object = {};
-      onValue(object);
+      const object2 = {};
+      onValue(object2);
       previousParents.push(currentParent);
-      currentParent = object;
+      currentParent = object2;
       currentProperty = null;
     },
     onObjectProperty: (name) => {
@@ -1010,6 +1010,118 @@ function printParseErrorCode(code) {
   return "<unknown ParseErrorCode>";
 }
 
+// scripts/frontend-build.mjs
+var object = (value) =>
+  value && typeof value === "object" && !Array.isArray(value);
+var publicName = /^(?:VITE_|NEXT_PUBLIC_|NUXT_PUBLIC_|PUBLIC_)[A-Z0-9_]+$/;
+var safePath = (value) =>
+  typeof value === "string" &&
+  /^[A-Za-z0-9_./-]+$/.test(value) &&
+  !value.startsWith("/") &&
+  value
+    .split("/")
+    .every(
+      (part) =>
+        part &&
+        part !== "." &&
+        part !== ".." &&
+        !part.startsWith(".") &&
+        !["node_modules"].includes(part),
+    );
+function validateBuildInputs({ buildVariables, buildAssets } = {}) {
+  if (buildVariables !== void 0) {
+    if (!object(buildVariables) || Object.keys(buildVariables).length > 32)
+      throw new Error(
+        "buildVariables must be an object with at most 32 entries",
+      );
+    for (const [name, source] of Object.entries(buildVariables)) {
+      if (!publicName.test(name))
+        throw new Error("buildVariables may export only public frontend names");
+      if (!object(source) || Object.keys(source).length !== 1)
+        throw new Error("Each build variable must declare exactly one source");
+      const [kind] = Object.keys(source);
+      if (kind === "value") {
+        if (typeof source.value !== "string" || source.value.length > 16384)
+          throw new Error("Build variable value must be a bounded string");
+      } else if (kind === "variable") {
+        if (!/^[A-Z][A-Z0-9_]*$/.test(source.variable))
+          throw new Error("Build variable source must name a GitHub variable");
+      } else if (kind === "secret") {
+        if (
+          !Array.isArray(source.secret) ||
+          source.secret.length < 1 ||
+          source.secret.length > 4 ||
+          source.secret.some(
+            (name2) => typeof name2 !== "string" || !publicName.test(name2),
+          )
+        )
+          throw new Error(
+            "Build secret sources must name public tokens, never a control credential",
+          );
+      } else if (kind !== "metadata" || source.metadata !== "version-tag") {
+        throw new Error("Unknown build variable source");
+      }
+    }
+  }
+  if (buildAssets === void 0) return;
+  if (
+    !object(buildAssets) ||
+    Object.keys(buildAssets).sort().join(",") !== "bucket,objects" ||
+    typeof buildAssets.bucket !== "string" ||
+    !/^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/.test(buildAssets.bucket) ||
+    !Array.isArray(buildAssets.objects) ||
+    buildAssets.objects.length < 1 ||
+    buildAssets.objects.length > 32
+  )
+    throw new Error(
+      "buildAssets must declare an R2 bucket and 1\u201332 objects",
+    );
+  const destinations = /* @__PURE__ */ new Set();
+  for (const asset of buildAssets.objects) {
+    if (
+      !object(asset) ||
+      Object.keys(asset).sort().join(",") !== "destinations,key,sha256" ||
+      !safePath(asset.key)
+    )
+      throw new Error("Invalid build asset object key");
+    if (!/^[a-f0-9]{64}$/.test(asset.sha256))
+      throw new Error("Build assets require SHA-256 checksums");
+    if (
+      !Array.isArray(asset.destinations) ||
+      asset.destinations.length < 1 ||
+      asset.destinations.length > 8
+    )
+      throw new Error("Build assets require 1\u20138 destinations");
+    for (const destination of asset.destinations) {
+      if (
+        !safePath(destination) ||
+        !destination.split("/").slice(0, -1).includes("public") ||
+        destinations.has(destination)
+      )
+        throw new Error("Invalid or duplicate static build asset path");
+      destinations.add(destination);
+    }
+  }
+}
+
+// scripts/phala-setup.mjs
+function check(condition, message) {
+  if (!condition) throw new Error(message);
+}
+function validateInfrastructure(value) {
+  check(
+    value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      Object.keys(value).sort().join(",") === "instanceType,osImage,region" &&
+      /^dstack-\d+\.\d+\.\d+$/.test(value.osImage ?? "") &&
+      /^tdx\.[a-z0-9.-]+$/.test(value.instanceType ?? "") &&
+      /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value.region ?? ""),
+    "Explicit Phala setup infrastructure requires osImage, instanceType and lowercase region",
+  );
+  return value;
+}
+
 // scripts/policy.mjs
 var QUALITY_PATH = ".github/quality-policy.jsonc";
 var DEPLOYMENT_PATH = ".github/deployment-policy.jsonc";
@@ -1128,6 +1240,7 @@ function validateDeploymentPolicy(policy) {
   }
   requireString(policy.workingDirectory, "deployment workingDirectory");
   requireString(policy.versionFile, "deployment versionFile");
+  validateBuildInputs({ buildAssets: policy.buildAssets });
   if (policy.containers === void 0) {
     policy.containers = false;
   } else if (typeof policy.containers !== "boolean") {
@@ -1294,6 +1407,7 @@ function validateDeploymentPolicy(policy) {
     if (!target || typeof target !== "object") {
       throw new Error(`deployment targets.${role} must be an object`);
     }
+    validateBuildInputs({ buildVariables: target.buildVariables });
     for (const field of ["githubEnvironment", "url"]) {
       requireString(target[field], `deployment targets.${role}.${field}`);
     }
@@ -1546,6 +1660,7 @@ function validatePhalaPolicy(policy) {
       `Phala targets.${role}.githubEnvironment`,
     );
     requireString(target.cvmName, `Phala targets.${role}.cvmName`);
+    if (target.setup !== void 0) validateInfrastructure(target.setup);
     if (target.publicUrl !== void 0) {
       requireString(target.publicUrl, `Phala targets.${role}.publicUrl`);
       let url;
@@ -1589,7 +1704,7 @@ function validatePhalaPolicy(policy) {
   return policy;
 }
 function loadPolicies(
-  root = process.cwd(),
+  root = process2.cwd(),
   deploymentRequired = false,
   npmRequired = false,
   phalaRequired = false,
@@ -1643,29 +1758,29 @@ function loadPolicies(
   return { quality, deployment, npm, phala };
 }
 function writeOutput(name, value) {
-  if (!process.env.GITHUB_OUTPUT) {
+  if (!process2.env.GITHUB_OUTPUT) {
     throw new Error("GITHUB_OUTPUT is required");
   }
   fs.appendFileSync(
-    process.env.GITHUB_OUTPUT,
+    process2.env.GITHUB_OUTPUT,
     `${name}=${value}
 `,
   );
 }
 function runPolicy() {
-  const deploymentRequired = process.argv.includes("--deployment");
-  const npmRequired = process.argv.includes("--npm");
-  const phalaRequired = process.argv.includes("--phala");
+  const deploymentRequired = process2.argv.includes("--deployment");
+  const npmRequired = process2.argv.includes("--npm");
+  const phalaRequired = process2.argv.includes("--phala");
   const { quality, deployment, npm, phala } = loadPolicies(
-    process.env.POLICY_ROOT ?? process.cwd(),
+    process2.env.POLICY_ROOT ?? process2.cwd(),
     deploymentRequired,
     npmRequired,
     phalaRequired,
     {
-      quality: process.env.QUALITY_POLICY_PATH,
-      deployment: process.env.DEPLOYMENT_POLICY_PATH,
-      npm: process.env.NPM_POLICY_PATH,
-      phala: process.env.PHALA_POLICY_PATH,
+      quality: process2.env.QUALITY_POLICY_PATH,
+      deployment: process2.env.DEPLOYMENT_POLICY_PATH,
+      npm: process2.env.NPM_POLICY_PATH,
+      phala: process2.env.PHALA_POLICY_PATH,
     },
   );
   writeOutput("quality", JSON.stringify(quality));
@@ -1686,7 +1801,7 @@ function runPolicy() {
 try {
   runPolicy();
 } catch (error) {
-  process2.stderr.write(`${error.message}
+  process3.stderr.write(`${error.message}
 `);
-  process2.exitCode = 1;
+  process3.exitCode = 1;
 }

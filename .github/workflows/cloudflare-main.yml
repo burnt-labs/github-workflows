@@ -41,7 +41,7 @@ jobs:
 
   quality:
     needs: validate
-    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@324440298ac0d377a53b85d73cc738d1d4583336 # unreleased
+    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@69582ace4ab106c8d0463b072aaeaedb95b017bd # unreleased
     with:
       quality-policy-path: ${{ inputs.quality-policy-path }}
       deployment-policy-path: ${{ inputs.deployment-policy-path }}
@@ -69,6 +69,10 @@ jobs:
           gh api --paginate "repos/${{ github.repository }}/releases?per_page=100" \
             --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name' \
             > "$RUNNER_TEMP/release-tags.txt"
+          # A failed legacy deployment may leave a tag without a release.
+          # Reserve those versions too: --target never moves an existing tag.
+          gh api --paginate "repos/${{ github.repository }}/tags?per_page=100" \
+            --jq '.[].name' >> "$RUNNER_TEMP/release-tags.txt"
       - id: metadata
         env:
           GITHUB_RUN_NUMBER: ${{ github.run_number }}
@@ -90,7 +94,7 @@ jobs:
     permissions:
       contents: read
       deployments: write
-    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@324440298ac0d377a53b85d73cc738d1d4583336 # unreleased
+    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@69582ace4ab106c8d0463b072aaeaedb95b017bd # unreleased
     with:
       # Under single topology the candidate and the release are the same
       # Worker, so deploying here would serve the merge immediately and there
@@ -112,7 +116,7 @@ jobs:
     permissions:
       contents: read
       deployments: write
-    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@324440298ac0d377a53b85d73cc738d1d4583336 # unreleased
+    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@69582ace4ab106c8d0463b072aaeaedb95b017bd # unreleased
     with:
       operation: preview
       target: release
@@ -198,7 +202,7 @@ jobs:
     permissions:
       contents: read
       deployments: write
-    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@324440298ac0d377a53b85d73cc738d1d4583336 # unreleased
+    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@69582ace4ab106c8d0463b072aaeaedb95b017bd # unreleased
     with:
       operation: deploy
       target: release

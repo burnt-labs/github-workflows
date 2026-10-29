@@ -493,10 +493,10 @@ function parse(text, errors = [], options = ParseOptions.DEFAULT) {
   }
   const visitor = {
     onObjectBegin: () => {
-      const object2 = {};
-      onValue(object2);
+      const object3 = {};
+      onValue(object3);
       previousParents.push(currentParent);
-      currentParent = object2;
+      currentParent = object3;
       currentProperty = null;
     },
     onObjectProperty: (name) => {
@@ -1009,6 +1009,100 @@ function printParseErrorCode(code) {
   return "<unknown ParseErrorCode>";
 }
 
+// scripts/frontend-build.mjs
+var object = (value) =>
+  value && typeof value === "object" && !Array.isArray(value);
+var publicName = /^(?:VITE_|NEXT_PUBLIC_|NUXT_PUBLIC_|PUBLIC_)[A-Z0-9_]+$/;
+var safePath = (value) =>
+  typeof value === "string" &&
+  /^[A-Za-z0-9_./-]+$/.test(value) &&
+  !value.startsWith("/") &&
+  value
+    .split("/")
+    .every(
+      (part) =>
+        part &&
+        part !== "." &&
+        part !== ".." &&
+        !part.startsWith(".") &&
+        !["node_modules"].includes(part),
+    );
+function validateBuildInputs({ buildVariables, buildAssets } = {}) {
+  if (buildVariables !== void 0) {
+    if (!object(buildVariables) || Object.keys(buildVariables).length > 32)
+      throw new Error(
+        "buildVariables must be an object with at most 32 entries",
+      );
+    for (const [name, source] of Object.entries(buildVariables)) {
+      if (!publicName.test(name))
+        throw new Error("buildVariables may export only public frontend names");
+      if (!object(source) || Object.keys(source).length !== 1)
+        throw new Error("Each build variable must declare exactly one source");
+      const [kind] = Object.keys(source);
+      if (kind === "value") {
+        if (typeof source.value !== "string" || source.value.length > 16384)
+          throw new Error("Build variable value must be a bounded string");
+      } else if (kind === "variable") {
+        if (!/^[A-Z][A-Z0-9_]*$/.test(source.variable))
+          throw new Error("Build variable source must name a GitHub variable");
+      } else if (kind === "secret") {
+        if (
+          !Array.isArray(source.secret) ||
+          source.secret.length < 1 ||
+          source.secret.length > 4 ||
+          source.secret.some(
+            (name2) => typeof name2 !== "string" || !publicName.test(name2),
+          )
+        )
+          throw new Error(
+            "Build secret sources must name public tokens, never a control credential",
+          );
+      } else if (kind !== "metadata" || source.metadata !== "version-tag") {
+        throw new Error("Unknown build variable source");
+      }
+    }
+  }
+  if (buildAssets === void 0) return;
+  if (
+    !object(buildAssets) ||
+    Object.keys(buildAssets).sort().join(",") !== "bucket,objects" ||
+    typeof buildAssets.bucket !== "string" ||
+    !/^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/.test(buildAssets.bucket) ||
+    !Array.isArray(buildAssets.objects) ||
+    buildAssets.objects.length < 1 ||
+    buildAssets.objects.length > 32
+  )
+    throw new Error(
+      "buildAssets must declare an R2 bucket and 1\u201332 objects",
+    );
+  const destinations = /* @__PURE__ */ new Set();
+  for (const asset of buildAssets.objects) {
+    if (
+      !object(asset) ||
+      Object.keys(asset).sort().join(",") !== "destinations,key,sha256" ||
+      !safePath(asset.key)
+    )
+      throw new Error("Invalid build asset object key");
+    if (!/^[a-f0-9]{64}$/.test(asset.sha256))
+      throw new Error("Build assets require SHA-256 checksums");
+    if (
+      !Array.isArray(asset.destinations) ||
+      asset.destinations.length < 1 ||
+      asset.destinations.length > 8
+    )
+      throw new Error("Build assets require 1\u20138 destinations");
+    for (const destination of asset.destinations) {
+      if (
+        !safePath(destination) ||
+        !destination.split("/").slice(0, -1).includes("public") ||
+        destinations.has(destination)
+      )
+        throw new Error("Invalid or duplicate static build asset path");
+      destinations.add(destination);
+    }
+  }
+}
+
 // scripts/policy.mjs
 var TOPOLOGIES = {
   standard: { candidate: "staging", release: "production" },
@@ -1055,6 +1149,7 @@ function validateDeploymentPolicy(policy) {
   }
   requireString(policy.workingDirectory, "deployment workingDirectory");
   requireString(policy.versionFile, "deployment versionFile");
+  validateBuildInputs({ buildAssets: policy.buildAssets });
   if (policy.containers === void 0) {
     policy.containers = false;
   } else if (typeof policy.containers !== "boolean") {
@@ -1221,6 +1316,7 @@ function validateDeploymentPolicy(policy) {
     if (!target || typeof target !== "object") {
       throw new Error(`deployment targets.${role} must be an object`);
     }
+    validateBuildInputs({ buildVariables: target.buildVariables });
     for (const field of ["githubEnvironment", "url"]) {
       requireString(target[field], `deployment targets.${role}.${field}`);
     }
@@ -1318,7 +1414,7 @@ function validateDeploymentPolicy(policy) {
 }
 
 // scripts/env-json.mjs
-function object(value) {
+function object2(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 function validateEnvironmentBundle(raw, policy) {
@@ -1329,10 +1425,10 @@ function validateEnvironmentBundle(raw, policy) {
     throw new Error("Environment bundle is not valid JSON");
   }
   if (
-    !object(bundle) ||
+    !object2(bundle) ||
     Object.keys(bundle).sort().join(",") !== "secrets,vars" ||
-    !object(bundle.vars) ||
-    !object(bundle.secrets)
+    !object2(bundle.vars) ||
+    !object2(bundle.secrets)
   ) {
     throw new Error(
       "Environment bundle must contain only vars and secrets objects",
@@ -1423,11 +1519,11 @@ function materializePublicConfiguration(options) {
     fs.readFileSync(files.source, "utf8"),
     "source Wrangler configuration",
   );
-  if (!object(config))
+  if (!object2(config))
     throw new Error("Source Wrangler configuration must be an object");
   const scope =
     policy.topology === "single" ? config : config.env?.[selected.wranglerEnv];
-  if (!object(scope))
+  if (!object2(scope))
     throw new Error(
       "Source Wrangler configuration does not contain the selected environment",
     );

@@ -2,6 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { parse, printParseErrorCode } from "jsonc-parser";
+import { validateBuildInputs } from "./frontend-build.mjs";
+import { validateInfrastructure } from "./phala-setup.mjs";
 
 const QUALITY_PATH = ".github/quality-policy.jsonc";
 const DEPLOYMENT_PATH = ".github/deployment-policy.jsonc";
@@ -134,6 +136,7 @@ export function validateDeploymentPolicy(policy) {
   }
   requireString(policy.workingDirectory, "deployment workingDirectory");
   requireString(policy.versionFile, "deployment versionFile");
+  validateBuildInputs({ buildAssets: policy.buildAssets });
   if (policy.containers === undefined) {
     policy.containers = false;
   } else if (typeof policy.containers !== "boolean") {
@@ -342,6 +345,7 @@ export function validateDeploymentPolicy(policy) {
     if (!target || typeof target !== "object") {
       throw new Error(`deployment targets.${role} must be an object`);
     }
+    validateBuildInputs({ buildVariables: target.buildVariables });
     for (const field of ["githubEnvironment", "url"]) {
       requireString(target[field], `deployment targets.${role}.${field}`);
     }
@@ -631,6 +635,7 @@ export function validatePhalaPolicy(policy) {
       `Phala targets.${role}.githubEnvironment`,
     );
     requireString(target.cvmName, `Phala targets.${role}.cvmName`);
+    if (target.setup !== undefined) validateInfrastructure(target.setup);
     if (target.publicUrl !== undefined) {
       requireString(target.publicUrl, `Phala targets.${role}.publicUrl`);
       let url;
