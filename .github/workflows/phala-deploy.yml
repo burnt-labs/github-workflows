@@ -144,12 +144,6 @@ jobs:
           const secretNames = JSON.parse(process.env.SECRET_NAMES);
           const variableNames = JSON.parse(process.env.VARIABLE_NAMES);
           const target = JSON.parse(process.env.TARGET_CONFIGURATION);
-          if (target.configuration) {
-            const { resolveTargetConfiguration } = await import(`${process.env.RUNNER_TEMP}/burnt-phala-tools/scripts/phala-configuration.mjs`);
-            const resolved = resolveTargetConfiguration(target, secrets[target.configuration.secret], JSON.parse(process.env.RUNTIME_VARIABLES));
-            Object.assign(variables, resolved.values);
-            fs.writeFileSync(`${process.env.RUNNER_TEMP}/phala-target.json`, JSON.stringify({ ...resolved.target, publicValues: resolved.values }), { mode: 0o600 });
-          }
           // Default deploys retain legacy per-key variables; bundles are for setup/update.
           const useConfiguration = (process.env.PHALA_OPERATION || "deploy") !== "deploy" && target.configuration;
           if (useConfiguration) {
