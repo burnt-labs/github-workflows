@@ -114,6 +114,7 @@ export function requireAbsentApp(apps, name) {
   );
 }
 export async function setupCvm({
+  operation = "setup",
   name,
   infrastructure,
   image,
@@ -136,13 +137,35 @@ export async function setupCvm({
     "Immutable image and commit identity required",
   );
   check(!fs.existsSync(receiptFile), "Refusing to overwrite a setup receipt");
-  requireAbsentApp(await appInventory(run), name);
+  check(
+    ["setup", "update"].includes(operation),
+    "Explicit setup or update required",
+  );
+  const apps = await appInventory(run);
+  let existing;
+  if (operation === "setup") requireAbsentApp(apps, name);
+  else {
+    const matches = apps.filter(
+      (app) => app.name === name || app.current_cvm?.name === name,
+    );
+    check(
+      matches.length === 1 && matches[0].current_cvm,
+      "Update requires one existing CVM; creation is forbidden",
+    );
+    existing = JSON.parse(
+      await run(["cvms", "get", `app_${matches[0].app_id}`, "--json"]),
+    );
+    check(
+      existing.app_id === matches[0].app_id && existing.name === name,
+      "Existing Phala identity mismatch",
+    );
+    verifyInfrastructure(existing, infrastructure);
+  }
   // Do not wait in deploy: capture the newly allocated identity before polling.
   const created = JSON.parse(
     await run([
       "deploy",
-      "--name",
-      name,
+      ...(existing ? ["--cvm-id", `app_${existing.app_id}`] : ["--name", name]),
       "--compose",
       composeFile,
       "--env",
@@ -181,7 +204,9 @@ export async function setupCvm({
     mode: 0o600,
   });
   check(
-    created.success === true && created.name === name,
+    created.success === true &&
+      created.name === name &&
+      (!existing || created.app_id === existing.app_id),
     "Created Phala identity mismatch; recover the saved identity",
   );
   for (let attempt = 0; attempt < attempts; attempt++) {
@@ -202,22 +227,34 @@ export async function setupCvm({
       "Created Phala identity mismatch; recover the saved identity",
     );
     if (detail.status === "running") {
+      verifyInfrastructure(detail, infrastructure);
       check(
-        detail.os?.name === infrastructure.osImage &&
-          detail.os?.is_dev === false &&
-          detail.resource?.instance_type === infrastructure.instanceType &&
-          typeof detail.node_info?.region === "string" &&
-          detail.node_info.region.toLowerCase() === infrastructure.region &&
-          detail.listed === false &&
-          detail.public_logs === false &&
-          detail.public_sysinfo === false,
-        "Created Phala infrastructure differs from the declared OS, size, region or privacy policy",
+        /^[a-f0-9]{64}$/.test(detail.compose_hash ?? ""),
+        "Platform compose hash missing",
       );
+      receipt.reportedComposeHash = detail.compose_hash;
+      fs.writeFileSync(receiptFile, JSON.stringify(receipt, null, 2) + "\n", {
+        mode: 0o600,
+      });
       return receipt;
     }
     if (attempt + 1 < attempts) await wait(10000);
   }
   throw new Error(
     "Phala readiness timed out; recover the exact identity in the pending setup receipt",
+  );
+}
+
+function verifyInfrastructure(detail, infrastructure) {
+  check(
+    detail.os?.name === infrastructure.osImage &&
+      detail.os?.is_dev === false &&
+      detail.resource?.instance_type === infrastructure.instanceType &&
+      typeof detail.node_info?.region === "string" &&
+      detail.node_info.region.toLowerCase() === infrastructure.region &&
+      detail.listed === false &&
+      detail.public_logs === false &&
+      detail.public_sysinfo === false,
+    "Phala infrastructure differs from declared OS, size, region or privacy policy",
   );
 }

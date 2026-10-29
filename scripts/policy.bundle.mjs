@@ -1122,6 +1122,41 @@ function validateInfrastructure(value) {
   return value;
 }
 
+// scripts/phala-configuration.mjs
+function validateTargetConfiguration(target, names) {
+  const config = target.configuration;
+  if (config === void 0) return;
+  if (
+    !config ||
+    Object.keys(config).sort().join() !== "runtimeValues,secret" ||
+    !/^[A-Z][A-Z0-9_]*$/.test(config.secret ?? "") ||
+    !config.runtimeValues ||
+    Object.keys(config.runtimeValues).sort().join() !==
+      [...names].sort().join() ||
+    target.setup !== void 0
+  )
+    throw new Error(
+      "Phala configuration requires one secret, exact runtimeValues and no static setup",
+    );
+  for (const source of Object.values(config.runtimeValues)) {
+    if (
+      !source ||
+      !["field", "field,https", "value"].includes(
+        Object.keys(source).sort().join(),
+      ) ||
+      (source.https !== void 0 && source.https !== true) ||
+      !(
+        typeof source.value === "string" ||
+        (typeof source.field === "string" &&
+          /^[A-Za-z][A-Za-z0-9_]*$/.test(source.field))
+      )
+    )
+      throw new Error(
+        "Phala configuration values require a literal value or bundle field",
+      );
+  }
+}
+
 // scripts/policy.mjs
 var QUALITY_PATH = ".github/quality-policy.jsonc";
 var DEPLOYMENT_PATH = ".github/deployment-policy.jsonc";
@@ -1661,6 +1696,11 @@ function validatePhalaPolicy(policy) {
     );
     requireString(target.cvmName, `Phala targets.${role}.cvmName`);
     if (target.setup !== void 0) validateInfrastructure(target.setup);
+    validateTargetConfiguration(target, policy.runtimeVariables);
+    if (target.configuration && reserved.includes(target.configuration.secret))
+      throw new Error(
+        "Phala configuration secret cannot be a reserved credential",
+      );
     if (target.publicUrl !== void 0) {
       requireString(target.publicUrl, `Phala targets.${role}.publicUrl`);
       let url;

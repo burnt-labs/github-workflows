@@ -4,6 +4,7 @@ import process from "node:process";
 import { parse, printParseErrorCode } from "jsonc-parser";
 import { validateBuildInputs } from "./frontend-build.mjs";
 import { validateInfrastructure } from "./phala-setup.mjs";
+import { validateTargetConfiguration } from "./phala-configuration.mjs";
 
 const QUALITY_PATH = ".github/quality-policy.jsonc";
 const DEPLOYMENT_PATH = ".github/deployment-policy.jsonc";
@@ -636,6 +637,11 @@ export function validatePhalaPolicy(policy) {
     );
     requireString(target.cvmName, `Phala targets.${role}.cvmName`);
     if (target.setup !== undefined) validateInfrastructure(target.setup);
+    validateTargetConfiguration(target, policy.runtimeVariables);
+    if (target.configuration && reserved.includes(target.configuration.secret))
+      throw new Error(
+        "Phala configuration secret cannot be a reserved credential",
+      );
     if (target.publicUrl !== undefined) {
       requireString(target.publicUrl, `Phala targets.${role}.publicUrl`);
       let url;

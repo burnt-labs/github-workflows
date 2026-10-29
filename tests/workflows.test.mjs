@@ -1452,18 +1452,89 @@ test("Phala setup rejects automatic events and feature branches before policy or
     false,
   );
   assert.match(steps[preflight].run, /RUNNER_TEMP/);
-  const create = steps.find((step) => step.name === "Create the first CVM");
-  assert.equal(create.if, "inputs.operation == 'setup'");
+  const create = steps.find(
+    (step) => step.name === "Apply explicit Phala operation",
+  );
+  assert.equal(create.if, "inputs.operation != 'deploy'");
   assert.equal(
     steps.find((step) => step.name === "Deploy CVM").if,
-    "inputs.operation != 'setup'",
+    "inputs.operation == 'deploy'",
   );
   const upload = steps.find(
     (step) =>
       step.name === "Preserve public setup identity on success or failure",
   );
-  assert.match(upload.if, /always\(\).*setup/);
+  assert.match(upload.if, /always\(\).*deploy/);
   assert.equal(upload.with.path, "${{ runner.temp }}/phala-setup.json");
   assert.equal(steps.at(-1).if, "${{ always() }}");
   assert.match(steps.at(-1).run, /rm -f.*phala-api-key.*phala.env/);
+});
+
+test("explicit Phala operations resolve bundles centrally and expose public acceptance metadata", () => {
+  const workflow = parse(
+    fs.readFileSync(`${directory}/phala-deploy.yml`, "utf8"),
+  );
+  const steps = workflow.jobs.deploy.steps;
+  const collect = steps.find(
+    (s) =>
+      s.name === "Collect deployment credentials and runtime configuration",
+  );
+  assert.match(collect.run, /resolveTargetConfiguration/);
+  assert.match(collect.run, /phala-target.json/);
+  assert.match(
+    workflow.on.workflow_call.outputs["app-id"].value,
+    /jobs.deploy.outputs/,
+  );
+  assert.match(
+    workflow.on.workflow_call.outputs["compose-hash"].value,
+    /jobs.deploy.outputs/,
+  );
+  const build = steps.find((s) => s.name === "Build and push image");
+  assert.equal(
+    build.with["build-args"],
+    "${{ inputs.operation != 'deploy' && format('GIT_SHA={0}', github.sha) || '' }}",
+  );
+  assert.equal(
+    build.with.provenance,
+    "${{ inputs.operation != 'deploy' && 'mode=max' || '' }}",
+  );
+});
+
+test("measured public configuration is substituted without rejecting environment key names", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "phala-measured-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const workflow = parse(
+    fs.readFileSync(`${directory}/phala-deploy.yml`, "utf8"),
+  );
+  const render = workflow.jobs.deploy.steps.find(
+    (s) => s.name === "Render the compose file",
+  );
+  const compose = path.join(root, "compose.yaml");
+  fs.writeFileSync(
+    compose,
+    'services:\n  app:\n    image: ${APP_IMAGE}\n    environment:\n      METRICS_URL: "${METRICS_URL:?required}"\n',
+  );
+  fs.writeFileSync(
+    path.join(root, "phala-target.json"),
+    JSON.stringify({
+      publicValues: { METRICS_URL: "https://metrics.example" },
+    }),
+  );
+  const child = spawnSync("bash", ["-euo", "pipefail", "-c", render.run], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      RUNNER_TEMP: root,
+      WORKING_DIRECTORY: root,
+      COMPOSE_FILE: compose,
+      IMAGE_VARIABLE: "APP_IMAGE",
+      IMAGE_REPOSITORY: "ghcr.io/example/service/app",
+      IMAGE_DIGEST: `sha256:${"a".repeat(64)}`,
+      GITHUB_OUTPUT: path.join(root, "outputs"),
+    },
+  });
+  assert.equal(child.status, 0, child.stderr);
+  const result = fs.readFileSync(path.join(root, "phala-compose.yaml"), "utf8");
+  assert(result.includes('METRICS_URL: "https://metrics.example"'));
+  assert(!result.includes("${METRICS_URL"));
 });

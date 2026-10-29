@@ -533,3 +533,34 @@ resources itself.
 Cloudflare consumers can declare target-specific public build inputs and
 checksummed private R2 static assets. See [public frontend build inputs](docs/frontend-build.md)
 for the schema, credential boundary and limits.
+
+### Environment configuration bundles for explicit Phala operations
+
+Explicit setup/update can resolve a protected environment's existing JSON
+configuration secret without workstation credentials or consumer deployment
+scripts. A target may declare `configuration` instead of static `setup`:
+
+```jsonc
+"configuration": {
+  "secret": "SERVICE_CONFIG_JSON",
+  "runtimeValues": {
+    "SERVICE_ENV": { "value": "production" },
+    "METRICS_URL": { "field": "metricsUrl", "https": true },
+  },
+},
+```
+
+The keys in runtimeValues must exactly match the top-level runtimeVariables
+allowlist. The bundle must contain exactly osImage, instanceType, region and
+all referenced fields. Infrastructure has no defaults. Values remain strings;
+`https: true` rejects credentials, query/fragment and whitespace in URLs.
+Only the declared bundle is parsed, and parse errors never disclose its body.
+Legacy per-key policies and ordinary deploys are unchanged.
+
+Both explicit operations require manual default-branch invocation. Update uses
+the pinned modern API, validates existing infrastructure before mutation, and
+refuses creation. They publish app-id and compose-hash outputs for a consumer's
+public conformance check. Their build embeds GIT_SHA and requests provenance
+and SBOM; the legacy deploy build inputs remain unchanged. Shared health checks
+are availability checks. Consumer conformance jobs must verify their own service
+source revision, compose identity and posture before accepting a rollout.
