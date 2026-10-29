@@ -13,6 +13,12 @@ on:
         default: deploy
         type: string
     outputs:
+      app-id:
+        description: Exact app identity for explicit setup/update acceptance
+        value: ${{ jobs.deploy.outputs.app-id }}
+      compose-hash:
+        description: Platform-reported compose hash for explicit setup/update acceptance
+        value: ${{ jobs.deploy.outputs.compose-hash }}
       deployment-url:
         description: Public HTTPS endpoint that passed the health check (the target's publicUrl when set, otherwise the one Phala reports)
         value: ${{ jobs.deploy.outputs.deployment-url }}
@@ -37,8 +43,8 @@ jobs:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           case "$PHALA_OPERATION" in
-            deploy|update) ;;
-            setup)
+            deploy) ;;
+            setup|update)
               if [ "$GITHUB_EVENT_NAME" != workflow_dispatch ] || [ -z "$DEFAULT_BRANCH" ] || [ "$GITHUB_REF" != "refs/heads/$DEFAULT_BRANCH" ]; then
                 echo "::error::setup requires a manual run from the caller's default branch"
                 exit 1
@@ -60,7 +66,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: burnt-labs/github-workflows
-          ref: 0854b15da7459ad18ca892027792dae970b7bf07 # unreleased
+          ref: fb985d64a0a97b69ffb51598ce5e75bb01234fd0 # unreleased
           path: .burnt-workflows
       - id: policy
         name: Require and validate Phala policy
@@ -68,7 +74,7 @@ jobs:
 
   quality:
     needs: policy
-    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@1ac7d0c010c242d1ff97c3d9baaded8d77609428 # unreleased
+    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@18ac34fe76ba39f6712cb9a6e503ad3cf5e57949 # unreleased
 
   deploy:
     name: Phala ${{ inputs.target }}
@@ -86,6 +92,8 @@ jobs:
       packages: write
     outputs:
       deployment-url: ${{ steps.phala-url.outputs.deployment-url }}
+      compose-hash: ${{ steps.platform.outputs.compose-hash }}
+      app-id: ${{ steps.platform.outputs.app-id }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -94,15 +102,15 @@ jobs:
         with:
           node-version: lts/*
       - name: Checkout central setup tools
-        if: inputs.operation == 'setup'
+        if: inputs.operation != 'deploy'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: burnt-labs/github-workflows
-          ref: 0854b15da7459ad18ca892027792dae970b7bf07 # unreleased
+          ref: fb985d64a0a97b69ffb51598ce5e75bb01234fd0 # unreleased
           path: .burnt-phala-tools
           persist-credentials: false
       - name: Move setup tooling outside the image build context
-        if: inputs.operation == 'setup'
+        if: inputs.operation != 'deploy'
         run: |
           test ! -e "$RUNNER_TEMP/burnt-phala-tools"
           mv .burnt-phala-tools "$RUNNER_TEMP/burnt-phala-tools"
@@ -125,13 +133,25 @@ jobs:
           SECRET_NAMES: ${{ toJSON(fromJSON(needs.policy.outputs.phala).runtimeSecrets) }}
           VARIABLE_NAMES: ${{ toJSON(fromJSON(needs.policy.outputs.phala).runtimeVariables) }}
           REGISTRY_USERNAME: ${{ fromJSON(needs.policy.outputs.phala).image.registryUsername }}
+          TARGET_CONFIGURATION: ${{ toJSON(fromJSON(needs.policy.outputs.phala).targets[inputs.target]) }}
+          RUNTIME_VARIABLES: ${{ toJSON(fromJSON(needs.policy.outputs.phala).runtimeVariables) }}
+          PHALA_OPERATION: ${{ inputs.operation }}
         run: |
-          node - <<'NODE'
-          const fs = require("node:fs");
+          node --input-type=module - <<'NODE'
+          import fs from "node:fs";
           const secrets = JSON.parse(process.env.ALL_SECRETS);
           const variables = JSON.parse(process.env.ALL_VARIABLES);
           const secretNames = JSON.parse(process.env.SECRET_NAMES);
           const variableNames = JSON.parse(process.env.VARIABLE_NAMES);
+          const target = JSON.parse(process.env.TARGET_CONFIGURATION);
+          // Default deploys retain legacy per-key variables; bundles are for setup/update.
+          const useConfiguration = (process.env.PHALA_OPERATION || "deploy") !== "deploy" && target.configuration;
+          if (useConfiguration) {
+            const { resolveTargetConfiguration } = await import(`${process.env.RUNNER_TEMP}/burnt-phala-tools/scripts/phala-configuration.mjs`);
+            const resolved = resolveTargetConfiguration(target, secrets[target.configuration.secret], JSON.parse(process.env.RUNTIME_VARIABLES));
+            Object.assign(variables, resolved.values);
+            fs.writeFileSync(`${process.env.RUNNER_TEMP}/phala-target.json`, JSON.stringify({ ...resolved.target, publicValues: resolved.values }), { mode: 0o600 });
+          }
           const apiKey = secrets[process.env.API_KEY_NAME];
           const registryPassword = secrets[process.env.REGISTRY_PASSWORD_NAME];
           const missing = [
@@ -146,7 +166,7 @@ jobs:
           }
           const environment = Object.fromEntries([
             ...secretNames.map((name) => [name, secrets[name]]),
-            ...variableNames.map((name) => [name, variables[name]]),
+            ...(!useConfiguration ? variableNames.map((name) => [name, variables[name]]) : []),
             ["DSTACK_DOCKER_REGISTRY", "ghcr.io"],
             ["DSTACK_DOCKER_USERNAME", process.env.REGISTRY_USERNAME],
             ["DSTACK_DOCKER_PASSWORD", registryPassword],
@@ -163,6 +183,7 @@ jobs:
             { mode: 0o600 },
           );
           NODE
+          if [ "$PHALA_OPERATION" = deploy ]; then
           case "$(npx --yes phala@1.1.20 --version)" in
             v1.1.20 | v1.1.20+*) ;;
             *)
@@ -170,10 +191,12 @@ jobs:
               exit 1
               ;;
           esac
+          fi
       - name: Validate initial setup before image publication
-        if: inputs.operation == 'setup'
+        if: inputs.operation != 'deploy'
         env:
           PHALA_POLICY: ${{ needs.policy.outputs.phala }}
+          PHALA_OPERATION: ${{ inputs.operation }}
           TARGET_ROLE: ${{ inputs.target }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: node "$RUNNER_TEMP/burnt-phala-tools/scripts/phala-setup-cli.mjs" preflight
@@ -193,6 +216,9 @@ jobs:
           file: ${{ fromJSON(needs.policy.outputs.phala).image.dockerfile }}
           push: true
           tags: ${{ steps.image.outputs.image }}
+          build-args: ${{ inputs.operation != 'deploy' && format('GIT_SHA={0}', github.sha) || '' }}
+          provenance: ${{ inputs.operation != 'deploy' && 'mode=max' || '' }}
+          sbom: ${{ inputs.operation != 'deploy' }}
       # dstack hashes the compose text it is given, and that hash is what a
       # relying party's allowlist checks. Substituting the image here rather
       # than delivering it as a CVM environment variable is the whole point:
@@ -220,7 +246,27 @@ jobs:
             process.exit(1);
           }
           const reference = `${process.env.IMAGE_REPOSITORY}@${digest}`;
-          const source = fs.readFileSync(process.env.COMPOSE_FILE, "utf8");
+          let source = fs.readFileSync(process.env.COMPOSE_FILE, "utf8");
+          const targetFile = path.join(process.env.RUNNER_TEMP, "phala-target.json");
+          if (fs.existsSync(targetFile)) {
+            const { publicValues } = JSON.parse(fs.readFileSync(targetFile, "utf8"));
+            for (const [key, value] of Object.entries(publicValues)) {
+              const expression = new RegExp(`\\$\\{${key}(:\\?[^}]*)?\\}`, "g");
+              if (!expression.test(source)) throw new Error("Declared measured configuration is missing from compose");
+              // Measured values must occupy a whole quoted mapping value; bare
+              // scalars such as null, true and 123 would change type in YAML.
+              source = source.replace(expression, (match, required, offset) => {
+                const before = source.slice(source.lastIndexOf("\n", offset) + 1, offset);
+                const after = source.slice(offset + match.length).split("\n", 1)[0];
+                const context = /^[ \t]*[A-Za-z_][A-Za-z0-9_]*:[ \t]*(["'])$/.exec(before);
+                if (!context || !new RegExp(`^${context[1]}[ \\t]*(?:#.*)?\\r?$`).test(after)) {
+                  throw new Error("Measured configuration requires a whole quoted YAML mapping value");
+                }
+                return value;
+              });
+              if (source.includes("${" + key + ":") || source.includes("${" + key + "}")) throw new Error("Measured configuration placeholder remains in compose");
+            }
+          }
           // The two spellings a compose file may use: the bare ${VAR} and the
           // required form ${VAR:?message}. The default form ${VAR:-fallback}
           // is deliberately not matched — a default image reference is one a
@@ -250,11 +296,13 @@ jobs:
       # because the named CVM was deleted or renamed would deploy an instance
       # none of that points at, and report success. A release target is
       # provisioned explicitly once, then only ever updated by id on deploy.
-      - name: Create the first CVM
-        if: inputs.operation == 'setup'
+      - name: Apply explicit Phala operation
+        id: platform
+        if: inputs.operation != 'deploy'
         timeout-minutes: 45
         env:
           PHALA_POLICY: ${{ needs.policy.outputs.phala }}
+          PHALA_OPERATION: ${{ inputs.operation }}
           TARGET_ROLE: ${{ inputs.target }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           IMAGE_REPOSITORY: ${{ steps.image.outputs.repository }}
@@ -262,7 +310,7 @@ jobs:
           COMPOSE_FILE: ${{ steps.compose.outputs.file }}
         run: node "$RUNNER_TEMP/burnt-phala-tools/scripts/phala-setup-cli.mjs" create
       - name: Deploy CVM
-        if: inputs.operation != 'setup'
+        if: inputs.operation == 'deploy'
         env:
           PHALA_OPERATION: ${{ inputs.operation }}
           TARGET_ROLE: ${{ inputs.target }}
@@ -313,7 +361,7 @@ jobs:
           TARGET_ROLE: ${{ inputs.target }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
-          if [ "$PHALA_OPERATION" = setup ]; then
+          if [ "$PHALA_OPERATION" != deploy ]; then
             node "$RUNNER_TEMP/burnt-phala-tools/scripts/phala-setup-cli.mjs" url
             exit 0
           fi
@@ -352,21 +400,22 @@ jobs:
           done
           echo "::error::Phala deployment health check failed after 30 attempts"
           exit 1
-      - name: Mark initial setup healthy
-        if: inputs.operation == 'setup'
+      - name: Mark explicit Phala operation healthy
+        if: inputs.operation != 'deploy'
         env:
           PHALA_POLICY: ${{ needs.policy.outputs.phala }}
+          PHALA_OPERATION: ${{ inputs.operation }}
           TARGET_ROLE: ${{ inputs.target }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: node "$RUNNER_TEMP/burnt-phala-tools/scripts/phala-setup-cli.mjs" ready
       - name: Preserve public setup identity on success or failure
-        if: ${{ always() && inputs.operation == 'setup' }}
+        if: ${{ always() && inputs.operation != 'deploy' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: phala-setup-${{ inputs.target }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: phala-${{ inputs.operation }}-${{ inputs.target }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/phala-setup.json
           if-no-files-found: ignore
           retention-days: 30
       - name: Remove temporary deployment credentials
         if: ${{ always() }}
-        run: rm -f "$RUNNER_TEMP/phala-api-key" "$RUNNER_TEMP/phala.env"
+        run: rm -f "$RUNNER_TEMP/phala-api-key" "$RUNNER_TEMP/phala.env" "$RUNNER_TEMP/phala-target.json"

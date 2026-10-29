@@ -14,7 +14,10 @@ import {
 try {
   requireSetupInvocation(process.env, process.env.DEFAULT_BRANCH);
   const policy = JSON.parse(process.env.PHALA_POLICY);
-  const target = policy.targets[process.env.TARGET_ROLE];
+  const targetFile = path.join(process.env.RUNNER_TEMP, "phala-target.json");
+  const target = fs.existsSync(targetFile)
+    ? JSON.parse(fs.readFileSync(targetFile, "utf8"))
+    : policy.targets[process.env.TARGET_ROLE];
   if (!target || !["candidate", "release"].includes(process.env.TARGET_ROLE))
     throw new Error("Invalid target");
   validateInfrastructure(target.setup);
@@ -51,9 +54,19 @@ try {
   };
   const phase = process.argv[2];
   if (phase === "preflight") {
-    requireAbsentApp(await appInventory(run), target.cvmName);
+    const apps = await appInventory(run);
+    if (process.env.PHALA_OPERATION === "update") {
+      const matches = apps.filter(
+        (app) =>
+          app.name === target.cvmName ||
+          app.current_cvm?.name === target.cvmName,
+      );
+      if (matches.length !== 1 || !matches[0].current_cvm)
+        throw new Error("Update requires one existing CVM");
+    } else requireAbsentApp(apps, target.cvmName);
   } else if (phase === "create") {
-    await setupCvm({
+    const record = await setupCvm({
+      operation: process.env.PHALA_OPERATION || "setup",
       name: target.cvmName,
       infrastructure: target.setup,
       image: `${process.env.IMAGE_REPOSITORY}@${process.env.IMAGE_DIGEST}`,
@@ -63,6 +76,11 @@ try {
       receiptFile,
       run,
     });
+    if (process.env.GITHUB_OUTPUT)
+      fs.appendFileSync(
+        process.env.GITHUB_OUTPUT,
+        `app-id=${record.appId}\ncompose-hash=${record.reportedComposeHash}\n`,
+      );
   } else if (phase === "url") {
     const receipt = JSON.parse(fs.readFileSync(receiptFile, "utf8"));
     const detail = JSON.parse(

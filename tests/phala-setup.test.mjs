@@ -43,6 +43,7 @@ const detail = (overrides = {}) => ({
   vm_uuid: vmUuid,
   name: "service-production",
   status: "running",
+  compose_hash: "c".repeat(64),
   os: { name: infrastructure.osImage, is_dev: false },
   resource: { instance_type: infrastructure.instanceType },
   node_info: { object_type: "node", region: "US-WEST-1" },
@@ -404,7 +405,7 @@ test("workflow CLI stages preserve the receipt through HTTP acceptance and withh
   assert.equal(JSON.parse(fs.readFileSync(saved)).status, "pending");
   assert.equal(
     fs.readFileSync(output, "utf8"),
-    "deployment-url=https://service.example\n",
+    `app-id=${appId}\ncompose-hash=${"c".repeat(64)}\ndeployment-url=https://service.example\n`,
   );
   assert.equal(invoke("ready").status, 0);
   assert.equal(JSON.parse(fs.readFileSync(saved)).status, "ready");
@@ -429,4 +430,45 @@ test("creation response mismatch preserves valid returned IDs for recovery", asy
       : base(args);
   await assert.rejects(setupCvm(options), /identity/);
   assert.equal(JSON.parse(fs.readFileSync(receiptFile)).appId, appId);
+});
+
+test("explicit update preserves app identity, checks posture before mutation, and never creates", async (t) => {
+  const { options, calls } = fixture(t);
+  const base = options.run;
+  options.operation = "update";
+  options.run = async (args) =>
+    args[0] === "api"
+      ? JSON.stringify(
+          page([app({ name: options.name, current_cvm: detail() })]),
+        )
+      : base(args);
+  await setupCvm(options);
+  const deployment = calls.find((args) => args[0] === "deploy");
+  assert(deployment.includes("--cvm-id"));
+  assert(deployment.includes(`app_${appId}`));
+  assert(!deployment.includes("--name"));
+  const absent = fixture(t);
+  await assert.rejects(
+    setupCvm({ ...absent.options, operation: "update" }),
+    /existing CVM/,
+  );
+  assert(!absent.calls.some((args) => args[0] === "deploy"));
+  const wrong = fixture(t);
+  const wrongBase = wrong.options.run;
+  await assert.rejects(
+    setupCvm({
+      ...wrong.options,
+      operation: "update",
+      run: async (args) =>
+        args[0] === "api"
+          ? JSON.stringify(
+              page([app({ name: options.name, current_cvm: detail() })]),
+            )
+          : args[0] === "cvms"
+            ? JSON.stringify(detail({ public_logs: true }))
+            : wrongBase(args),
+    }),
+    /infrastructure/,
+  );
+  assert(!wrong.calls.some((args) => args[0] === "deploy"));
 });
