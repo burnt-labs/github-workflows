@@ -251,7 +251,17 @@ jobs:
             for (const [key, value] of Object.entries(publicValues)) {
               const expression = new RegExp(`\\$\\{${key}(:\\?[^}]*)?\\}`, "g");
               if (!expression.test(source)) throw new Error("Declared measured configuration is missing from compose");
-              source = source.replace(expression, () => value);
+              // Measured values must occupy a whole quoted mapping value; bare
+              // scalars such as null, true and 123 would change type in YAML.
+              source = source.replace(expression, (match, required, offset) => {
+                const before = source.slice(source.lastIndexOf("\n", offset) + 1, offset);
+                const after = source.slice(offset + match.length).split("\n", 1)[0];
+                const context = /^[ \t]*[A-Za-z_][A-Za-z0-9_]*:[ \t]*(["'])$/.exec(before);
+                if (!context || !new RegExp(`^${context[1]}[ \\t]*(?:#.*)?\\r?$`).test(after)) {
+                  throw new Error("Measured configuration requires a whole quoted YAML mapping value");
+                }
+                return value;
+              });
               if (source.includes("${" + key + ":") || source.includes("${" + key + "}")) throw new Error("Measured configuration placeholder remains in compose");
             }
           }
