@@ -1100,7 +1100,7 @@ test("npm changesets flow publishes with OIDC and API commits only", () => {
   );
   assert.match(validate.if, /workingDirectory != '\.'/);
   assert.match(validate.run, /repository root/);
-  const publish = release.steps.at(-1);
+  const publish = release.steps.find((step) => step.id === "changesets");
   assert.equal(publish.with.commitMode, "github-api");
   // A stale run — one whose branch has already moved on — must stand down
   // rather than force-update the version pull request backwards.
@@ -1113,6 +1113,34 @@ test("npm changesets flow publishes with OIDC and API commits only", () => {
     /repository\.private == false/,
   );
   assert.match(source, /ACTIONS_ID_TOKEN_REQUEST_URL/);
+});
+
+test("npm changesets post-publish check runs after any attempted publish", () => {
+  const workflow = parse(
+    fs.readFileSync(`${directory}/npm-changesets.yml`, "utf8"),
+  );
+  const input = workflow.on.workflow_call.inputs["post-publish-command"];
+  // Optional and empty by default, so existing callers are unaffected.
+  assert.equal(input.required, false);
+  assert.equal(input.default, "");
+  assert.equal(input.type, "string");
+  const steps = workflow.jobs.release.steps;
+  const publishIndex = steps.findIndex((step) => step.id === "changesets");
+  const verify = steps[publishIndex + 1];
+  // Last, directly after the publish: nothing may sit between them that a
+  // failed publish would skip.
+  assert.equal(verify, steps.at(-1));
+  assert.equal(verify.run, "${{ inputs.post-publish-command }}");
+  // npm publishes are not transactional, so the check must run when the
+  // publish step fails partway — without always() a failed step skips it.
+  assert.match(verify.if, /^always\(\) && /);
+  assert.match(verify.if, /inputs\.post-publish-command != ''/);
+  assert.match(verify.if, /steps\.changesets\.outcome == 'failure'/);
+  assert.match(verify.if, /steps\.changesets\.outputs\.published == 'true'/);
+  // It runs at the repository root like the rest of the job, and is handed
+  // no token.
+  assert.equal(verify["working-directory"], undefined);
+  assert.equal(verify.env, undefined);
 });
 
 test("npm changesets guard rejects real credentials, allows the placeholder", (t) => {
