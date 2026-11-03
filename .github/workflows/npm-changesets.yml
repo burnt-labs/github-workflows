@@ -27,6 +27,8 @@
 #   that one file
 # - version-command / publish-command when its scripts differ from the
 #   defaults; both run from the repository root
+# - optionally post-publish-command, a check of what actually reached the
+#   registry; see the recovery contract below
 #
 # Serialization is enforced here — the release job carries a per-repository,
 # non-cancelling concurrency group — so a caller needs no concurrency of its
@@ -39,6 +41,16 @@
 # so that build-class failures never reach the sequential publish at all;
 # what a partial publish can still mean is a registry-side failure, and the
 # fix is always "run it again", never manual registry surgery.
+#
+# What the contract does not give a caller is a statement of the registry's
+# state after a failed run: the publish step's red mark says something went
+# wrong, not which packages are now live and which dependents point at
+# versions that never arrived. post-publish-command answers that. It runs
+# right after the publish step whenever that step published or failed —
+# a failure included, which a publish-command suffix cannot express, since
+# the shell stops at the first failing command — and its own exit status
+# fails the job, so its report is what the run ends on. It is skipped on
+# successful version-pull-request runs, on stale runs, and when left empty.
 #
 # Known, accepted exposure: changesets/action hands its environment —
 # GITHUB_TOKEN included — to the version and publish commands, which run
@@ -79,6 +91,13 @@ on:
         description: Command Changesets runs to publish the packages
         required: false
         default: npm run publish:packages
+        type: string
+      post-publish-command:
+        description: >-
+          Command run after the publish step whenever it published or failed,
+          to verify what reached the registry; empty skips it
+        required: false
+        default: ""
         type: string
       pr-title:
         description: Title of the version pull request
@@ -235,6 +254,7 @@ jobs:
             echo "::notice::$REF_NAME has moved to $head; standing down in favor of that commit's run."
           fi
       - name: Create release pull request or publish to npm
+        id: changesets
         if: steps.freshness.outputs.stale == 'false'
         uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
         with:
@@ -253,3 +273,19 @@ jobs:
           # the same OIDC path without attesting, and starts attesting the
           # moment it goes public, with no workflow change.
           NPM_CONFIG_PROVENANCE: ${{ github.event.repository.private == false }}
+      # npm publishes are not transactional: a multi-package publish that
+      # fails partway leaves some packages live and others missing, and the
+      # failure alone does not say which. always() is what lets the check run
+      # after a failed publish; the outcome test confines it to runs that
+      # actually attempted one — a skipped publish (stale run, or an earlier
+      # step failing) has outcome `skipped` and published unset, so it never
+      # matches. The action reports no mode on failure, so a failed
+      # version-pull-request run triggers the check too: it must hold against
+      # a registry this run never touched. It runs from the repository root
+      # like the version and publish commands, but without GITHUB_TOKEN.
+      - name: Verify the published packages
+        if: >-
+          always() && inputs.post-publish-command != '' &&
+          (steps.changesets.outcome == 'failure' ||
+          steps.changesets.outputs.published == 'true')
+        run: ${{ inputs.post-publish-command }}

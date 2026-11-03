@@ -310,6 +310,23 @@ publish when it lands — in the same trusted-publishing posture as the rest of
 the family. The tag-derived flows below are for repositories publishing one
 package.
 
+Its inputs are `version-command` and `publish-command` (defaults
+`npm run version:packages` / `npm run publish:packages`), `pr-title`,
+`pr-commit`, `quality-policy-path`, and an optional `post-publish-command`. A
+multi-package publish is not transactional, so a run that fails partway can
+leave some packages live and others missing; `post-publish-command` is a
+repository-root check of what actually reached the registry, run whenever the
+publish step published or failed, and its exit status fails the job. Empty, the
+default, skips it.
+
+```yaml
+jobs:
+  release:
+    uses: burnt-labs/github-workflows/.github/workflows/npm-changesets.yml@<sha>
+    with:
+      post-publish-command: node scripts/verify-published.mjs
+```
+
 The tag-derived pair performs a package dry run on pull requests, publishes
 `v<version>-rc.<run>` with the `next` dist-tag from main, and publishes the
 stable version with `latest` after manual or automatic promotion. Publishing

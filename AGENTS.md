@@ -368,7 +368,11 @@ publishes:
   stream would bump both; Changesets scopes each change to the packages it
   names and cascades bumps through dependents. The caller is a single
   push-to-main trigger with no routing: merging the version pull request is
-  the release act, and the same run publishes.
+  the release act, and the same run publishes. An optional
+  `post-publish-command` input runs after the publish step whenever it
+  published _or failed_ — npm publishes are not transactional, and a partial
+  multi-package publish is the one state the resumable publish cannot report —
+  so a caller's registry check gets its say on exactly the runs that need it.
 
 Both shapes share the publishing posture below — OIDC trusted publishing, no
 tokens, provenance only from public repositories.
