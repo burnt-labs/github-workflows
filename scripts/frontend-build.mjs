@@ -220,26 +220,34 @@ export async function runFrontendBuild() {
     secrets: JSON.parse(process.env.BUILD_SECRETS || "{}"),
     versionTag: process.env.VERSION_TAG,
   });
-  // The policy working directory is relative to the checkout. Reject symlinks
-  // before resolving it, so a consumer cannot point the downloader elsewhere.
-  const workspace = fs.realpathSync(process.cwd());
-  const directory = policy.workingDirectory;
-  if (directory !== "." && !safePath(directory))
-    throw new Error("Invalid build working directory");
-  let root = workspace;
-  for (const segment of directory === "." ? [] : directory.split("/")) {
-    root = path.join(root, segment);
-    if (
-      !fs.lstatSync(root).isDirectory() ||
-      fs.lstatSync(root).isSymbolicLink()
-    )
-      throw new Error("Invalid build directory or symlink");
+  // Only assets are written under the working directory. Build variables go to
+  // GITHUB_ENV alone, so a working directory that the Build step creates (a
+  // build output wrangler deploys from) must not fail a variables-only policy.
+  if (policy.buildAssets !== undefined) {
+    // The policy working directory is relative to the checkout. Reject symlinks
+    // before resolving it, so a consumer cannot point the downloader elsewhere.
+    const workspace = fs.realpathSync(process.cwd());
+    const directory = policy.workingDirectory;
+    if (directory !== "." && !safePath(directory))
+      throw new Error("Invalid build working directory");
+    let root = workspace;
+    for (const segment of directory === "." ? [] : directory.split("/")) {
+      root = path.join(root, segment);
+      let stat;
+      try {
+        stat = fs.lstatSync(root);
+      } catch {
+        throw new Error("Invalid build directory or symlink");
+      }
+      if (!stat.isDirectory() || stat.isSymbolicLink())
+        throw new Error("Invalid build directory or symlink");
+    }
+    await fetchBuildAssets(policy.buildAssets, {
+      root,
+      accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
+      token: process.env.CLOUDFLARE_API_TOKEN,
+    });
   }
-  await fetchBuildAssets(policy.buildAssets, {
-    root,
-    accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
-    token: process.env.CLOUDFLARE_API_TOKEN,
-  });
   for (const [name, value] of Object.entries(values)) {
     if (target.buildVariables[name].secret) {
       const escaped = value
