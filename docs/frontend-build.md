@@ -53,6 +53,14 @@ static `public` directories and may not traverse or contain symlinks, hidden
 segments or node_modules. Existing Worker configuration and resource identities
 are not changed. The font license remains the consumer's responsibility.
 
+The helper runs before the Build step. When `buildAssets` are declared, the
+deployment working directory must already exist in the checkout as a real
+directory (not a symlink) at that point, so assets cannot target a working
+directory that Build creates, such as a build output wrangler deploys from.
+`buildVariables` only write to the step environment (`GITHUB_ENV`) and never
+read or create the working directory, so a variables-only policy works with a
+working directory that does not exist until Build.
+
 Assets are mandatory whenever declared, including previews. The shared PR flow
 already skips credentialed previews for fork, draft and Dependabot PRs; quality
 runs without deployment credentials. There is no soft font fallback for a

@@ -11,6 +11,7 @@ import {
   validateBuildInputs,
   resolveBuildVariables,
   fetchBuildAssets,
+  runFrontendBuild,
 } from "../scripts/frontend-build.mjs";
 
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
@@ -286,6 +287,91 @@ test("bundled helper exports only declared public values and sanitizes parse fai
   });
   assert.equal(failed.status, 1);
   assert.doesNotMatch(failed.stderr + failed.stdout, /never-print-this/);
+});
+
+test("build variables do not require a working directory that Build creates", (t) => {
+  const root = fixture(t);
+  const envFile = path.join(root, "environment");
+  fs.writeFileSync(envFile, "");
+  const result = spawnSync(
+    process.execPath,
+    [path.resolve("scripts/frontend-build.bundle.mjs")],
+    {
+      cwd: root,
+      env: {
+        PATH: process.env.PATH,
+        GITHUB_ENV: envFile,
+        TARGET: "release",
+        DEPLOYMENT_POLICY: JSON.stringify({
+          workingDirectory: "dist/provider_registry_devtool",
+          targets: {
+            release: { buildVariables: { VITE_NETWORK: { value: "mainnet" } } },
+          },
+        }),
+      },
+      encoding: "utf8",
+    },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(
+    fs.readFileSync(envFile, "utf8"),
+    /VITE_NETWORK<<BUILD_[^\n]+\nmainnet\n/,
+  );
+  assert.equal(fs.existsSync(path.join(root, "dist")), false);
+});
+
+test("build assets still require an existing, non-symlinked working directory", async (t) => {
+  const root = fixture(t);
+  const outside = fixture(t);
+  fs.mkdirSync(path.join(root, "app"));
+  fs.symlinkSync(outside, path.join(root, "linked"));
+  fs.symlinkSync(outside, path.join(root, "app/linked"));
+  fs.writeFileSync(path.join(root, "file"), "");
+  const envFile = path.join(root, "environment");
+  fs.writeFileSync(envFile, "");
+  const saved = {
+    cwd: process.cwd(),
+    env: process.env,
+    fetch: globalThis.fetch,
+  };
+  const requests = [];
+  t.after(() => {
+    process.chdir(saved.cwd);
+    process.env = saved.env;
+    globalThis.fetch = saved.fetch;
+  });
+  process.chdir(root);
+  globalThis.fetch = async (url) => {
+    requests.push(url);
+    return new Response("font");
+  };
+  for (const workingDirectory of [
+    "dist/app",
+    "app/missing",
+    "linked",
+    "app/linked",
+    "file",
+    "file/app",
+  ]) {
+    process.env = {
+      PATH: saved.env.PATH,
+      GITHUB_ENV: envFile,
+      TARGET: "release",
+      CLOUDFLARE_ACCOUNT_ID: "a".repeat(32),
+      CLOUDFLARE_API_TOKEN: "private",
+      DEPLOYMENT_POLICY: JSON.stringify({
+        workingDirectory,
+        buildAssets: assetPolicy(Buffer.from("font")),
+        targets: {
+          release: { buildVariables: { VITE_NETWORK: { value: "mainnet" } } },
+        },
+      }),
+    };
+    await assert.rejects(runFrontendBuild(), /Invalid build directory/);
+  }
+  assert.deepEqual(requests, []);
+  assert.deepEqual(fs.readdirSync(outside), []);
+  assert.equal(fs.readFileSync(envFile, "utf8"), "");
 });
 
 test("workflow runs the pinned helper before consumer preparation with scoped step credentials", () => {
