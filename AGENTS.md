@@ -602,6 +602,11 @@ policy's `workingDirectory`, so the migrations directory resolves against the
 same wrangler configuration the deploy reads and the schema applied is the one
 the deployed Worker was built against. Under `standard` and `chain` topologies
 the target's `--env` is passed, so each environment migrates its own database.
+The one exception is a config file in `workingDirectory` that is already
+environment-resolved: it already names that environment's database, and
+`--env` is dropped. A `.wrangler/deploy/config.json` redirect is not that
+exception. D1 does not follow redirects, so it still needs `--env` against the
+source config. See "A build-emitted Wrangler config is already resolved".
 
 **Migrations apply on deploy, never on preview** — the same boundary Worker
 secrets draw. A preview must not mutate the target's database; on a `chain`
@@ -780,9 +785,57 @@ not left to default at the point of use. `previewReleaseOnMain` does this.
 `cond && '' || other` evaluates to `other` for _every_ value of `cond` — the
 empty branch can never be selected. Any ternary whose intended result is an
 empty string must be written with the condition negated and `''` on the right:
-`!cond && other || ''`. `cloudflare-version.yml` builds its optional `--env`
-fragment this way, and a test asserts the shape, because the broken form fails
-only under `single` topology and only at deploy time.
+`!cond && other || ''`. `cloudflare-version.yml` selects the target's
+`wranglerEnv` this way in its "Resolve Wrangler environment" step, and a test
+asserts the shape, because the broken form fails only under `single` topology
+and only at deploy time.
+
+**A build-emitted Wrangler config is already resolved.** `wranglerEnv` is the
+name of an `env.<name>` section in a hand-written wrangler config, and `--env`
+selects it. The Cloudflare Vite plugin (and similar build tools) instead emit a
+_resolved_ `wrangler.json` into the build output: no `env` section, `name`
+already the environment's Worker name, and a top-level `targetEnvironment`
+naming the environment it was built for. Point `workingDirectory` at that
+output (`dist/<worker>`) and `--env staging` no longer selects anything.
+Wrangler only warns that the section is missing and appends `-staging` to
+whatever name the build resolved. This happened to provider-devtool's staging
+candidate on 2026-11-06: it deployed as
+`provider-registry-devtool-staging-staging`. A release would have deployed
+`provider-registry-devtool-production` (the production name, which has no
+suffix, plus `-production`) and moved the production custom domains onto a
+Worker with no secrets.
+
+So `cloudflare-version.yml` never builds `--env` per command. One step,
+"Resolve Wrangler environment", runs after Build and emits an `env-flag`
+output, and every wrangler command takes it: deploy, `versions upload` and
+`d1 migrations apply`. Do not add a wrangler command that spells `--env`
+itself; a test rejects it. The rules are:
+
+- The decision reads the file every wrangler command reads directly. That is
+  the target's `wranglerConfig` when declared. Otherwise it is the first of
+  `wrangler.json`, `wrangler.jsonc` and `wrangler.toml` found searching upward
+  from `workingDirectory`, which is Wrangler's own search. If that file
+  carries `targetEnvironment`, `--env` is dropped for every command, and the
+  run fails unless the value equals the target's `wranglerEnv`.
+- A `.wrangler/deploy/config.json` redirect never drops `--env`. The Vite
+  plugin writes one at the project root, pointing at the build output. deploy
+  and `versions upload` follow it. **`d1 migrations apply` does not**: it reads
+  the source config, where only `--env` selects the target's database. Without
+  `--env` it would migrate the top-level database. Wrangler accepts a matching
+  `--env` on a redirected config without adding a suffix, and rejects a
+  mismatched one. The step also checks the redirect target's
+  `targetEnvironment`, so a mismatch fails before D1 migrations run. A
+  declared `wranglerConfig` is passed as `--config`, and Wrangler ignores the
+  redirect then.
+- JSON and JSONC are parsed, so comments and trailing commas are fine. In
+  TOML, only a top-level `targetEnvironment = "<env>"` counts. A file that does
+  not parse, or that has no `targetEnvironment`, keeps `--env` exactly as
+  before. `single` topology passes no `--env` at all.
+
+The consumer's build selects the environment. For the Vite plugin that is
+`CLOUDFLARE_ENV` at build time, typically fed per target through
+`buildVariables`, as provider-devtool does. The platform only checks that the
+build matches the target.
 
 **Mutually exclusive conditions can select nothing.** If every branch is
 conditional and none matches, the run succeeds having done nothing. Guard the

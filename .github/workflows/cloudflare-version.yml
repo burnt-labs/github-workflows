@@ -154,6 +154,146 @@ jobs:
         run: ${{ fromJSON(inputs.deployment-policy).targets[inputs.target].commands.prepare }}
       - name: Build
         run: ${{ fromJSON(inputs.quality-policy).commands.build }}
+      # Every wrangler command in this job takes its --env fragment from here,
+      # never from the policy directly, so all of them agree.
+      #
+      # A build tool such as the Cloudflare Vite plugin emits an
+      # environment-RESOLVED wrangler.json: no `env` section, `name` already the
+      # environment's Worker name, and a top-level `targetEnvironment` naming
+      # the environment it was built for. Passing --env to that file does not
+      # select anything — wrangler warns that the env section is missing and
+      # appends "-<env>" to whatever name the build resolved, so a staging build
+      # deploys as "<worker>-staging-staging" and a production one moves custom
+      # domains onto a Worker with no secrets. So for a resolved config --env is
+      # dropped, after checking `targetEnvironment` against the target's
+      # wranglerEnv: a staging build must never deploy as production.
+      #
+      # The decision reads the file every wrangler command reads directly: the
+      # target's wranglerConfig when declared, otherwise wrangler.json,
+      # wrangler.jsonc, then wrangler.toml, each searched upward from the
+      # working directory. Only that file can drop --env, because
+      # `d1 migrations apply` reads only that file.
+      #
+      # A `.wrangler/deploy/config.json` redirect (what the Vite plugin leaves
+      # at the project root) does NOT drop --env. deploy and versions upload
+      # follow it, d1 does not: without --env, d1 would migrate the source
+      # config's top-level database instead of the target's. Wrangler accepts a
+      # matching --env on a redirected config without appending a suffix, and
+      # rejects a mismatched one. This step checks the redirect's
+      # `targetEnvironment` too, so a mismatch fails here, before D1 migrations
+      # touch any database. A declared wranglerConfig is passed as --config,
+      # and wrangler never follows a redirect then.
+      #
+      # JSON and JSONC (comments, trailing commas) are parsed. In TOML only a
+      # top-level `targetEnvironment = "<env>"` counts. A file that cannot be
+      # parsed is treated as unresolved, which is today's behaviour, and
+      # wrangler reports the parse error itself. A config with no
+      # `targetEnvironment` keeps --env exactly as before. `single` topology has
+      # no wrangler environment and is untouched.
+      - name: Resolve Wrangler environment
+        id: wrangler-env
+        working-directory: ${{ fromJSON(inputs.deployment-policy).workingDirectory }}
+        env:
+          REQUESTED_ENV: ${{ fromJSON(inputs.deployment-policy).topology != 'single' && fromJSON(inputs.deployment-policy).targets[inputs.target].wranglerEnv || '' }}
+          WRANGLER_CONFIG: ${{ fromJSON(inputs.deployment-policy).targets[inputs.target].wranglerConfig || '' }}
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs");
+          const path = require("node:path");
+          const requested = process.env.REQUESTED_ENV || "";
+          const declared = process.env.WRANGLER_CONFIG || "";
+          const output = (flag) =>
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, `env-flag=${flag}\n`);
+          const fail = (message) => {
+            console.log(`::error::${message}`);
+            process.exit(1);
+          };
+          const shown = (file) => path.relative(process.cwd(), file) || file;
+          const findUp = (name) => {
+            for (let dir = process.cwd(); ; dir = path.dirname(dir)) {
+              const candidate = path.join(dir, name);
+              if (fs.existsSync(candidate)) return candidate;
+              if (path.dirname(dir) === dir) return undefined;
+            }
+          };
+          // Copies string literals whole, so `//` inside a URL survives.
+          const parseJsonc = (text) => {
+            const literal = /"(?:[^"\\]|\\.)*"/y;
+            const trailing = /,(?=(?:\s|\/\/[^\n]*|\/\*[\s\S]*?\*\/)*[}\]])/y;
+            let out = "";
+            for (let i = 0; i < text.length; ) {
+              literal.lastIndex = trailing.lastIndex = i;
+              if (literal.test(text)) {
+                out += text.slice(i, literal.lastIndex);
+                i = literal.lastIndex;
+              } else if (text.startsWith("//", i)) {
+                const end = text.indexOf("\n", i);
+                i = end < 0 ? text.length : end;
+              } else if (text.startsWith("/*", i)) {
+                const end = text.indexOf("*/", i + 2);
+                i = end < 0 ? text.length : end + 2;
+              } else if (trailing.test(text)) {
+                i += 1;
+              } else {
+                out += text[i++];
+              }
+            }
+            return JSON.parse(out);
+          };
+          // The environment a config was built for, or "" if it is not resolved.
+          const builtFor = (file) => {
+            const text = fs.readFileSync(file, "utf8");
+            if (file.endsWith(".toml")) {
+              const top = text.split(/^\s*\[/m)[0];
+              return /^\s*targetEnvironment\s*=\s*"([^"]*)"/m.exec(top)?.[1] ?? "";
+            }
+            try {
+              const value = parseJsonc(text)?.targetEnvironment;
+              return typeof value === "string" ? value : "";
+            } catch {
+              return "";
+            }
+          };
+          const mustMatch = (file, built) => {
+            if (built !== "" && built !== requested) {
+              fail(`${shown(file)} was built for Wrangler environment "${built}", but this target deploys to "${requested}". Rebuild for "${requested}"; refusing to deploy one environment's build as another.`);
+            }
+          };
+          const redirectTarget = () => {
+            const redirect = findUp(".wrangler/deploy/config.json");
+            if (!redirect) return undefined;
+            try {
+              const { configPath } = parseJsonc(fs.readFileSync(redirect, "utf8"));
+              const target = configPath && path.resolve(path.dirname(redirect), configPath);
+              return target && fs.existsSync(target) ? target : undefined;
+            } catch {
+              return undefined; // wrangler rejects an unreadable redirect itself.
+            }
+          };
+          const main = () => {
+            if (requested === "") return output("");
+            const flag = `--env ${requested}`;
+            const direct = declared
+              ? path.resolve(declared)
+              : ["wrangler.json", "wrangler.jsonc", "wrangler.toml"].map(findUp).find(Boolean);
+            const redirected = declared ? undefined : redirectTarget();
+            if (redirected) {
+              console.log(`Wrangler config (deploy, versions upload): ${shown(redirected)}, via .wrangler/deploy/config.json`);
+              mustMatch(redirected, builtFor(redirected));
+            }
+            if (!direct || !fs.existsSync(direct)) {
+              console.log(`Wrangler config: none found; keeping ${flag}.`);
+              return output(flag);
+            }
+            console.log(`Wrangler config: ${shown(direct)}`);
+            const built = builtFor(direct);
+            if (built === "") return output(flag);
+            mustMatch(direct, built);
+            console.log(`::notice::${shown(direct)} is already resolved for Wrangler environment "${built}"; running wrangler without --env.`);
+            return output("");
+          };
+          main();
+          NODE
       - name: Collect Worker secrets
         id: worker-secrets
         if: >-
@@ -208,7 +348,7 @@ jobs:
           fromJSON(inputs.deployment-policy).d1Migrations[0] != null
         env:
           DATABASES: ${{ toJSON(fromJSON(inputs.deployment-policy).d1Migrations) }}
-          ENV_FLAG: ${{ fromJSON(inputs.deployment-policy).topology != 'single' && format('--env {0}', fromJSON(inputs.deployment-policy).targets[inputs.target].wranglerEnv) || '' }}
+          ENV_FLAG: ${{ steps.wrangler-env.outputs.env-flag }}
           CONFIG_FLAG: ${{ fromJSON(inputs.deployment-policy).targets[inputs.target].wranglerConfig != null && format('--config {0}', fromJSON(inputs.deployment-policy).targets[inputs.target].wranglerConfig) || '' }}
         run: |
           {
@@ -262,19 +402,17 @@ jobs:
           accountId: ${{ secrets.cloudflare-account-id || secrets.BURNT_CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: ${{ fromJSON(inputs.deployment-policy).workingDirectory }}
           packageManager: ${{ fromJSON(inputs.deployment-policy).packageManager }}
-          # The --env fragment is written as `topology != 'single' && … || ''`
-          # and not `topology == 'single' && '' || …`. GitHub's && / || return
-          # the last evaluated operand, and an empty string is falsy — so the
-          # second form falls through to the right-hand side every time and
-          # would always pass --env. Under single topology there is no wrangler
-          # environment to name and passing one fails the deploy.
+          # The --env fragment comes from "Resolve Wrangler environment": empty
+          # under single topology and for an environment-resolved build output.
           #
-          # --secrets-file follows the same shape. The collect step succeeds only
+          # --secrets-file is written as `cond && format(…) || ''`, never
+          # `!cond && '' || …`: GitHub's && / || return the last evaluated
+          # operand and '' is falsy, so the second form always falls through. The collect step succeeds only
           # on a deploy with a non-empty workerSecrets, so a preview never gets
           # the flag. It needs wrangler 4.74.0 or newer.
           command: >-
             ${{ inputs.operation == 'preview' && 'versions upload' || 'deploy' }}
-            ${{ fromJSON(inputs.deployment-policy).topology != 'single' && format('--env {0}', fromJSON(inputs.deployment-policy).targets[inputs.target].wranglerEnv) || '' }}
+            ${{ steps.wrangler-env.outputs.env-flag }}
             ${{ fromJSON(inputs.deployment-policy).targets[inputs.target].wranglerConfig != null && format('--config {0}', fromJSON(inputs.deployment-policy).targets[inputs.target].wranglerConfig) || '' }}
             --message=${{ inputs.version-tag }}
             --tag "${{ inputs.version-tag }}"

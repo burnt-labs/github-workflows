@@ -511,16 +511,324 @@ test("Phala health checks fail closed and URL propagation stays caller-owned", (
 
 test("the single-topology --env fragment cannot fall through", () => {
   // GitHub's && / || return the last evaluated operand, and '' is falsy. So
-  // `topology == 'single' && '' || format('--env {0}', …)` returns the format
+  // `topology == 'single' && '' || …wranglerEnv` returns the environment
   // every time — including for single, where passing --env fails the deploy.
   // The condition must be written negated, with '' on the right.
-  const source = fs.readFileSync(`${directory}/cloudflare-version.yml`, "utf8");
-  const fragment = source
-    .split("\n")
-    .find((line) => line.includes("--env {0}"));
-  assert.ok(fragment, "expected a conditional --env fragment");
+  const workflow = parse(
+    fs.readFileSync(`${directory}/cloudflare-version.yml`, "utf8"),
+  );
+  const resolver = workflow.jobs.version.steps.find(
+    (step) => step.id === "wrangler-env",
+  );
+  const fragment = resolver?.env?.REQUESTED_ENV;
+  assert.ok(fragment, "expected a conditional wranglerEnv fragment");
   assert.match(fragment, /topology != 'single' &&/);
+  assert.match(fragment, /wranglerEnv \|\| '' \}\}$/);
   assert.doesNotMatch(fragment, /&& ''/);
+});
+
+test("every wrangler command takes --env from the resolver step", () => {
+  // A literal --env anywhere else would bypass the resolved-config check and
+  // reintroduce "<worker>-staging-staging". The only place the flag is built
+  // is the resolver's script.
+  const workflow = parse(
+    fs.readFileSync(`${directory}/cloudflare-version.yml`, "utf8"),
+  );
+  const steps = workflow.jobs.version.steps;
+  const resolver = steps.find((step) => step.id === "wrangler-env");
+  for (const step of steps) {
+    if (step === resolver) continue;
+    assert.doesNotMatch(
+      JSON.stringify(step),
+      /--env|wranglerEnv/,
+      `${step.name} must not build its own --env`,
+    );
+  }
+  const plan = steps.find((step) => step.name === "Plan D1 migrations");
+  assert.equal(plan.env.ENV_FLAG, "${{ steps.wrangler-env.outputs.env-flag }}");
+  const deploy = steps.find((step) => step.id === "wrangler");
+  assert.match(
+    deploy.with.command,
+    / \$\{\{ steps\.wrangler-env\.outputs\.env-flag \}\} /,
+  );
+  // Every wrangler-action step is preceded by the resolver, which itself
+  // runs after Build, because Build is what emits a resolved config.
+  const index = (step) => steps.indexOf(step);
+  assert.ok(index(resolver) > steps.findIndex((step) => step.name === "Build"));
+  assert.ok(index(resolver) < index(plan));
+  for (const step of steps.filter((step) =>
+    step.uses?.startsWith("cloudflare/wrangler-action@"),
+  )) {
+    assert.ok(index(resolver) < index(step), step.name);
+  }
+  assert.match(
+    resolver["working-directory"],
+    /deployment-policy\)\.workingDirectory/,
+  );
+  assert.match(resolver.env.WRANGLER_CONFIG, /wranglerConfig \|\| ''/);
+  // No other workflow runs wrangler for a target on its own.
+  for (const name of fs.readdirSync(directory)) {
+    if (!name.endsWith(".yml") || name === "cloudflare-version.yml") continue;
+    const source = fs.readFileSync(`${directory}/${name}`, "utf8");
+    assert.doesNotMatch(source, /wrangler-action@|--env\b/, name);
+  }
+});
+
+test("resolved Wrangler configs deploy without --env, and never as another environment", (t) => {
+  const workflow = parse(
+    fs.readFileSync(`${directory}/cloudflare-version.yml`, "utf8"),
+  );
+  const steps = workflow.jobs.version.steps;
+  const resolver = steps.find((step) => step.id === "wrangler-env");
+  const plan = steps.find((step) => step.name === "Plan D1 migrations");
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "wrangler-env-"));
+  t.after(() => fs.rmSync(root, { recursive: true }));
+
+  // What the Cloudflare Vite plugin emits for `CLOUDFLARE_ENV=staging`.
+  const resolved = (environment) =>
+    JSON.stringify({
+      configPath: "../../wrangler.jsonc",
+      topLevelName: "provider-registry-devtool",
+      definedEnvironments: ["production", "staging"],
+      targetEnvironment: environment,
+      name: `provider-registry-devtool-${environment}`,
+      main: "index.js",
+    });
+  const source = `{
+    // the hand-written source config
+    "name": "provider-registry-devtool",
+    "env": { "staging": {}, "production": {} },
+  }`;
+
+  const run = (label, files, env, cwd = ".") => {
+    const repository = path.join(root, label);
+    for (const [file, content] of Object.entries(files)) {
+      fs.mkdirSync(path.dirname(path.join(repository, file)), {
+        recursive: true,
+      });
+      fs.writeFileSync(path.join(repository, file), content);
+    }
+    const directory = path.join(repository, cwd);
+    fs.mkdirSync(directory, { recursive: true });
+    const outputFile = path.join(root, `${label}.output`);
+    fs.writeFileSync(outputFile, "");
+    const result = spawnSync("bash", ["-euo", "pipefail", "-c", resolver.run], {
+      cwd: directory,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GITHUB_OUTPUT: outputFile,
+        REQUESTED_ENV: "",
+        WRANGLER_CONFIG: "",
+        ...env,
+      },
+    });
+    const flag = /^env-flag=(.*)$/m.exec(fs.readFileSync(outputFile, "utf8"));
+    return { ...result, flag: flag?.[1] };
+  };
+  const renderD1 = (envFlag) => {
+    const outputFile = path.join(root, `d1-${Math.random()}`);
+    fs.writeFileSync(outputFile, "");
+    const result = spawnSync("bash", ["-euo", "pipefail", "-c", plan.run], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GITHUB_OUTPUT: outputFile,
+        DATABASES: JSON.stringify(["DEVTOOL_DB"]),
+        ENV_FLAG: envFlag,
+        CONFIG_FLAG: "",
+      },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    return fs.readFileSync(outputFile, "utf8");
+  };
+
+  // The provider-devtool shape: workingDirectory is the build output, which
+  // holds a resolved wrangler.json, under a repository-root wrangler.jsonc.
+  const matching = run(
+    "matching",
+    {
+      "wrangler.jsonc": source,
+      "dist/worker/wrangler.json": resolved("staging"),
+    },
+    { REQUESTED_ENV: "staging" },
+    "dist/worker",
+  );
+  assert.equal(matching.status, 0, matching.stdout + matching.stderr);
+  assert.equal(matching.flag, "");
+  assert.match(matching.stdout, /^Wrangler config: wrangler\.json$/m);
+  assert.match(matching.stdout, /::notice::.*"staging"/);
+  assert.doesNotMatch(renderD1(matching.flag), /--env/);
+
+  // A staging build must never deploy as production.
+  const mismatched = run(
+    "mismatched",
+    { "dist/worker/wrangler.json": resolved("staging") },
+    { REQUESTED_ENV: "production" },
+    "dist/worker",
+  );
+  assert.equal(mismatched.status, 1);
+  assert.equal(mismatched.flag, undefined);
+  assert.match(mismatched.stdout, /::error::.*"staging".*"production"/);
+
+  // An unresolved source config keeps --env exactly as before, through D1 too.
+  const unresolved = run(
+    "unresolved",
+    { "wrangler.jsonc": source },
+    { REQUESTED_ENV: "testnet" },
+  );
+  assert.equal(unresolved.status, 0, unresolved.stderr);
+  assert.equal(unresolved.flag, "--env testnet");
+  assert.match(unresolved.stdout, /^Wrangler config: wrangler\.jsonc$/m);
+  assert.match(renderD1(unresolved.flag), /--remote --env testnet\n/);
+  const plainJson = run(
+    "plain-json",
+    { "wrangler.json": JSON.stringify({ name: "w", env: { live: {} } }) },
+    { REQUESTED_ENV: "live" },
+  );
+  assert.equal(plainJson.flag, "--env live");
+  const toml = run(
+    "toml",
+    { "wrangler.toml": 'name = "w"\n[env.staging]\n' },
+    { REQUESTED_ENV: "staging" },
+  );
+  assert.equal(toml.flag, "--env staging");
+  // The search walks upward to / as wrangler's does, so a stray wrangler
+  // config above the temporary directory would change these results. The
+  // logged path says which file was read if that ever happens.
+  const missing = run("missing", {}, { REQUESTED_ENV: "staging" });
+  assert.equal(missing.status, 0, missing.stderr);
+  assert.match(missing.stdout, /^Wrangler config: none found/m);
+  assert.equal(missing.flag, "--env staging");
+
+  // Single topology is untouched, even beside a resolved file.
+  const single = run(
+    "single",
+    { "wrangler.json": resolved("production") },
+    { REQUESTED_ENV: "" },
+  );
+  assert.equal(single.status, 0, single.stderr);
+  assert.equal(single.flag, "");
+
+  // A declared wranglerConfig is the file wrangler reads, so it decides.
+  const declared = run(
+    "declared",
+    {
+      "wrangler.json": resolved("staging"),
+      ".wrangler.live-v2.generated.jsonc": source,
+    },
+    {
+      REQUESTED_ENV: "live-v2",
+      WRANGLER_CONFIG: ".wrangler.live-v2.generated.jsonc",
+    },
+  );
+  assert.equal(declared.status, 0, declared.stderr);
+  assert.equal(declared.flag, "--env live-v2");
+
+  // A Vite redirect at the project root keeps --env. deploy and versions
+  // upload follow it, and wrangler accepts a matching --env there without
+  // appending a suffix. `d1 migrations apply` does not follow it: it reads the
+  // source wrangler.jsonc, where only --env selects the target's database.
+  const viteRoot = (environment) => ({
+    "wrangler.jsonc": source,
+    ".wrangler/deploy/config.json": JSON.stringify({
+      configPath: "../../dist/worker/wrangler.json",
+    }),
+    "dist/worker/wrangler.json": resolved(environment),
+  });
+  const redirected = run("redirected", viteRoot("production"), {
+    REQUESTED_ENV: "production",
+  });
+  assert.equal(redirected.status, 0, redirected.stderr);
+  assert.equal(redirected.flag, "--env production");
+  assert.match(
+    redirected.stdout,
+    /dist\/worker\/wrangler\.json, via \.wrangler\/deploy\/config\.json/,
+  );
+  assert.match(renderD1(redirected.flag), /--remote --env production\n/);
+
+  // A redirected build for another environment fails here, before D1
+  // migrations run, rather than at wrangler deploy afterwards.
+  const redirectedMismatch = run("redirected-mismatch", viteRoot("staging"), {
+    REQUESTED_ENV: "production",
+  });
+  assert.equal(redirectedMismatch.status, 1);
+  assert.equal(redirectedMismatch.flag, undefined);
+  assert.match(
+    redirectedMismatch.stdout,
+    /::error::dist\/worker\/wrangler\.json .*"staging".*"production"/,
+  );
+
+  // A declared wranglerConfig becomes --config, and wrangler ignores the
+  // redirect then, so a mismatched redirect target does not matter.
+  const declaredOverRedirect = run(
+    "declared-over-redirect",
+    { ...viteRoot("staging"), "wrangler.live.jsonc": source },
+    { REQUESTED_ENV: "production", WRANGLER_CONFIG: "wrangler.live.jsonc" },
+  );
+  assert.equal(declaredOverRedirect.status, 0, declaredOverRedirect.stdout);
+  assert.equal(declaredOverRedirect.flag, "--env production");
+
+  // JSONC is parsed: comments and trailing commas do not hide the marker,
+  // and a mention inside a comment or a string is not the marker.
+  const jsoncResolved = run(
+    "jsonc-resolved",
+    {
+      "wrangler.jsonc":
+        '{\n  // built\n  "name": "w-staging", /* x */\n  "targetEnvironment": "staging",\n}',
+    },
+    { REQUESTED_ENV: "staging" },
+  );
+  assert.equal(jsoncResolved.status, 0, jsoncResolved.stdout);
+  assert.equal(jsoncResolved.flag, "");
+  const jsoncMismatch = run(
+    "jsonc-mismatch",
+    { "wrangler.jsonc": '{\n  "targetEnvironment": "staging", // built\n}' },
+    { REQUESTED_ENV: "production" },
+  );
+  assert.equal(jsoncMismatch.status, 1);
+  assert.match(jsoncMismatch.stdout, /::error::.*"staging".*"production"/);
+  const jsoncMention = run(
+    "jsonc-mention",
+    {
+      "wrangler.jsonc": `{
+        // targetEnvironment is set by the Vite build, not here.
+        "name": "w", "vars": { "URL": "https://x//targetEnvironment", },
+        "env": { "staging": {}, },
+      }`,
+    },
+    { REQUESTED_ENV: "staging" },
+  );
+  assert.equal(jsoncMention.status, 0, jsoncMention.stdout);
+  assert.equal(jsoncMention.flag, "--env staging");
+
+  // TOML: only a top-level key counts, never a comment or an env section.
+  const tomlResolved = run(
+    "toml-resolved",
+    { "wrangler.toml": 'name = "w-live"\ntargetEnvironment = "live"\n' },
+    { REQUESTED_ENV: "live" },
+  );
+  assert.equal(tomlResolved.flag, "");
+  const tomlMention = run(
+    "toml-mention",
+    {
+      "wrangler.toml":
+        '# targetEnvironment = "live"\nname = "w"\n[env.live]\ntargetEnvironment = "other"\n',
+    },
+    { REQUESTED_ENV: "live" },
+  );
+  assert.equal(tomlMention.status, 0, tomlMention.stdout);
+  assert.equal(tomlMention.flag, "--env live");
+
+  // A file that does not parse is today's unresolved case; wrangler reports
+  // the parse error itself.
+  const broken = run(
+    "broken",
+    { "wrangler.json": '{ "targetEnvironment": "staging"' },
+    { REQUESTED_ENV: "production" },
+  );
+  assert.equal(broken.status, 0, broken.stdout);
+  assert.equal(broken.flag, "--env production");
 });
 
 test("Wrangler metadata arguments remain single tokens", () => {
