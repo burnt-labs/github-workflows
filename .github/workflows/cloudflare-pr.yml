@@ -62,7 +62,7 @@ jobs:
     permissions:
       contents: read
       deployments: write
-    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@9c5c1416636e6ed90bbaa0b977ec0bbd0592c0b0 # unreleased
+    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@afc60d4d8fb7990632d864b0a981428f7ce1559a # unreleased
     with:
       operation: preview
       target: candidate
