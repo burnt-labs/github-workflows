@@ -118,13 +118,17 @@ tags within the configured namespace still fail.
 
 `workingDirectory` may point at a build output that holds an
 environment-resolved `wrangler.json`, such as the Cloudflare Vite plugin's
-`dist/<worker>`. That file has no `env` section and a top-level
+`dist/<worker>`. That file has no `env` section and has a top-level
 `targetEnvironment`, so `--env` would make Wrangler append the environment to
 the Worker name a second time (`my-worker-staging-staging`). When the config
-Wrangler will read carries `targetEnvironment`, every wrangler command (deploy,
-`versions upload`, D1 migrations) runs without `--env`, and the run fails unless
-`targetEnvironment` equals the target's `wranglerEnv` — a staging build can
-never deploy as production. Configs without `targetEnvironment` keep `--env`.
+file in `workingDirectory` (or the declared `wranglerConfig`) carries
+`targetEnvironment`, every wrangler command runs without `--env`: deploy,
+`versions upload` and D1 migrations. The run fails unless `targetEnvironment`
+equals the target's `wranglerEnv`, so a staging build can never deploy as
+production. A `.wrangler/deploy/config.json` redirect from the project root
+keeps `--env`, because `d1 migrations apply` does not follow the redirect and
+needs `--env` to pick the target's database. Its target must still match.
+Configs without `targetEnvironment` keep `--env`.
 
 ### Service environment bundles
 

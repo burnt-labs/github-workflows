@@ -162,21 +162,34 @@ jobs:
       # environment's Worker name, and a top-level `targetEnvironment` naming
       # the environment it was built for. Passing --env to that file does not
       # select anything — wrangler warns that the env section is missing and
-      # appends "-<env>" to the name again, so a staging build deploys as
-      # "<worker>-staging-staging" and a production one moves custom domains
-      # onto a Worker with no secrets. So for a resolved config --env is
+      # appends "-<env>" to whatever name the build resolved, so a staging build
+      # deploys as "<worker>-staging-staging" and a production one moves custom
+      # domains onto a Worker with no secrets. So for a resolved config --env is
       # dropped, after checking `targetEnvironment` against the target's
       # wranglerEnv: a staging build must never deploy as production.
       #
-      # The config is located the way wrangler locates it: the target's
-      # wranglerConfig when declared; otherwise wrangler.json, wrangler.jsonc,
-      # then wrangler.toml, each searched upward from the working directory,
-      # except that a `.wrangler/deploy/config.json` redirect, found the same
-      # way, wins over those. A config with no
-      # `targetEnvironment` keeps --env exactly as before. JSONC and TOML are
-      # not parsed: a file JSON.parse rejects is treated as unresolved, unless
-      # it mentions `targetEnvironment`, which fails rather than guess.
-      # `single` topology has no wrangler environment and is untouched.
+      # The decision reads the file every wrangler command reads directly: the
+      # target's wranglerConfig when declared, otherwise wrangler.json,
+      # wrangler.jsonc, then wrangler.toml, each searched upward from the
+      # working directory. Only that file can drop --env, because
+      # `d1 migrations apply` reads only that file.
+      #
+      # A `.wrangler/deploy/config.json` redirect (what the Vite plugin leaves
+      # at the project root) does NOT drop --env. deploy and versions upload
+      # follow it, d1 does not: without --env, d1 would migrate the source
+      # config's top-level database instead of the target's. Wrangler accepts a
+      # matching --env on a redirected config without appending a suffix, and
+      # rejects a mismatched one. This step checks the redirect's
+      # `targetEnvironment` too, so a mismatch fails here, before D1 migrations
+      # touch any database. A declared wranglerConfig is passed as --config,
+      # and wrangler never follows a redirect then.
+      #
+      # JSON and JSONC (comments, trailing commas) are parsed. In TOML only a
+      # top-level `targetEnvironment = "<env>"` counts. A file that cannot be
+      # parsed is treated as unresolved, which is today's behaviour, and
+      # wrangler reports the parse error itself. A config with no
+      # `targetEnvironment` keeps --env exactly as before. `single` topology has
+      # no wrangler environment and is untouched.
       - name: Resolve Wrangler environment
         id: wrangler-env
         working-directory: ${{ fromJSON(inputs.deployment-policy).workingDirectory }}
@@ -188,12 +201,14 @@ jobs:
           const fs = require("node:fs");
           const path = require("node:path");
           const requested = process.env.REQUESTED_ENV || "";
+          const declared = process.env.WRANGLER_CONFIG || "";
           const output = (flag) =>
             fs.appendFileSync(process.env.GITHUB_OUTPUT, `env-flag=${flag}\n`);
           const fail = (message) => {
             console.log(`::error::${message}`);
             process.exit(1);
           };
+          const shown = (file) => path.relative(process.cwd(), file) || file;
           const findUp = (name) => {
             for (let dir = process.cwd(); ; dir = path.dirname(dir)) {
               const candidate = path.join(dir, name);
@@ -201,46 +216,80 @@ jobs:
               if (path.dirname(dir) === dir) return undefined;
             }
           };
-          const locate = () => {
-            if (process.env.WRANGLER_CONFIG) {
-              return path.resolve(process.env.WRANGLER_CONFIG);
-            }
-            const user = ["wrangler.json", "wrangler.jsonc", "wrangler.toml"]
-              .map(findUp)
-              .find(Boolean);
-            const redirect = findUp(".wrangler/deploy/config.json");
-            if (redirect) {
-              try {
-                const { configPath } = JSON.parse(fs.readFileSync(redirect, "utf8"));
-                if (configPath) return path.resolve(path.dirname(redirect), configPath);
-              } catch {
-                // wrangler rejects an unreadable redirect itself.
+          // Copies string literals whole, so `//` inside a URL survives.
+          const parseJsonc = (text) => {
+            const literal = /"(?:[^"\\]|\\.)*"/y;
+            const trailing = /,(?=(?:\s|\/\/[^\n]*|\/\*[\s\S]*?\*\/)*[}\]])/y;
+            let out = "";
+            for (let i = 0; i < text.length; ) {
+              literal.lastIndex = trailing.lastIndex = i;
+              if (literal.test(text)) {
+                out += text.slice(i, literal.lastIndex);
+                i = literal.lastIndex;
+              } else if (text.startsWith("//", i)) {
+                const end = text.indexOf("\n", i);
+                i = end < 0 ? text.length : end;
+              } else if (text.startsWith("/*", i)) {
+                const end = text.indexOf("*/", i + 2);
+                i = end < 0 ? text.length : end + 2;
+              } else if (trailing.test(text)) {
+                i += 1;
+              } else {
+                out += text[i++];
               }
             }
-            return user;
+            return JSON.parse(out);
+          };
+          // The environment a config was built for, or "" if it is not resolved.
+          const builtFor = (file) => {
+            const text = fs.readFileSync(file, "utf8");
+            if (file.endsWith(".toml")) {
+              const top = text.split(/^\s*\[/m)[0];
+              return /^\s*targetEnvironment\s*=\s*"([^"]*)"/m.exec(top)?.[1] ?? "";
+            }
+            try {
+              const value = parseJsonc(text)?.targetEnvironment;
+              return typeof value === "string" ? value : "";
+            } catch {
+              return "";
+            }
+          };
+          const mustMatch = (file, built) => {
+            if (built !== "" && built !== requested) {
+              fail(`${shown(file)} was built for Wrangler environment "${built}", but this target deploys to "${requested}". Rebuild for "${requested}"; refusing to deploy one environment's build as another.`);
+            }
+          };
+          const redirectTarget = () => {
+            const redirect = findUp(".wrangler/deploy/config.json");
+            if (!redirect) return undefined;
+            try {
+              const { configPath } = parseJsonc(fs.readFileSync(redirect, "utf8"));
+              const target = configPath && path.resolve(path.dirname(redirect), configPath);
+              return target && fs.existsSync(target) ? target : undefined;
+            } catch {
+              return undefined; // wrangler rejects an unreadable redirect itself.
+            }
           };
           const main = () => {
             if (requested === "") return output("");
             const flag = `--env ${requested}`;
-            const config = locate();
-            if (!config || !fs.existsSync(config)) return output(flag);
-            const text = fs.readFileSync(config, "utf8");
-            const shown = path.relative(process.cwd(), config) || config;
-            let parsed;
-            try {
-              parsed = JSON.parse(text);
-            } catch {
-              if (/targetEnvironment/.test(text)) {
-                fail(`${shown} mentions targetEnvironment but is not plain JSON, so the environment it was built for cannot be verified. Refusing to deploy target environment "${requested}".`);
-              }
+            const direct = declared
+              ? path.resolve(declared)
+              : ["wrangler.json", "wrangler.jsonc", "wrangler.toml"].map(findUp).find(Boolean);
+            const redirected = declared ? undefined : redirectTarget();
+            if (redirected) {
+              console.log(`Wrangler config (deploy, versions upload): ${shown(redirected)}, via .wrangler/deploy/config.json`);
+              mustMatch(redirected, builtFor(redirected));
+            }
+            if (!direct || !fs.existsSync(direct)) {
+              console.log(`Wrangler config: none found; keeping ${flag}.`);
               return output(flag);
             }
-            const built = parsed?.targetEnvironment;
-            if (built === undefined || built === null || built === "") return output(flag);
-            if (built !== requested) {
-              fail(`${shown} was built for Wrangler environment "${built}", but this target deploys to "${requested}". Rebuild for "${requested}"; refusing to deploy one environment's build as another.`);
-            }
-            console.log(`::notice::${shown} is already resolved for Wrangler environment "${built}"; running wrangler without --env.`);
+            console.log(`Wrangler config: ${shown(direct)}`);
+            const built = builtFor(direct);
+            if (built === "") return output(flag);
+            mustMatch(direct, built);
+            console.log(`::notice::${shown(direct)} is already resolved for Wrangler environment "${built}"; running wrangler without --env.`);
             return output("");
           };
           main();
