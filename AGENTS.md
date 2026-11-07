@@ -601,7 +601,10 @@ or database name, whichever wrangler should receive — from the deployment
 policy's `workingDirectory`, so the migrations directory resolves against the
 same wrangler configuration the deploy reads and the schema applied is the one
 the deployed Worker was built against. Under `standard` and `chain` topologies
-the target's `--env` is passed, so each environment migrates its own database.
+the target's `--env` is passed, so each environment migrates its own database —
+unless the configuration is already environment-resolved, in which case it
+already names that environment's database and `--env` is dropped (see "A
+build-emitted Wrangler config is already resolved").
 
 **Migrations apply on deploy, never on preview** — the same boundary Worker
 secrets draw. A preview must not mutate the target's database; on a `chain`
@@ -780,9 +783,35 @@ not left to default at the point of use. `previewReleaseOnMain` does this.
 `cond && '' || other` evaluates to `other` for _every_ value of `cond` — the
 empty branch can never be selected. Any ternary whose intended result is an
 empty string must be written with the condition negated and `''` on the right:
-`!cond && other || ''`. `cloudflare-version.yml` builds its optional `--env`
-fragment this way, and a test asserts the shape, because the broken form fails
-only under `single` topology and only at deploy time.
+`!cond && other || ''`. `cloudflare-version.yml` selects the target's
+`wranglerEnv` this way in its "Resolve Wrangler environment" step, and a test
+asserts the shape, because the broken form fails only under `single` topology
+and only at deploy time.
+
+**A build-emitted Wrangler config is already resolved.** `wranglerEnv` is the
+name of an `env.<name>` section in a hand-written wrangler config, and `--env`
+selects it. The Cloudflare Vite plugin (and similar build tools) instead emit a
+_resolved_ `wrangler.json` into the build output: no `env` section, `name`
+already the environment's Worker name (`my-worker-staging`), and a top-level
+`targetEnvironment` naming the environment it was built for. Point
+`workingDirectory` at that output — `dist/<worker>` — and `--env staging` no
+longer selects anything: Wrangler only warns that the section is missing and
+appends `-staging` to the name again, deploying `my-worker-staging-staging`. A
+release would deploy `my-worker-production-production` and could move the
+production routes onto a Worker with no secrets. This happened to
+provider-devtool's staging candidate on 2026-11-06. So `cloudflare-version.yml`
+never builds `--env` per command: one step, "Resolve Wrangler environment",
+finds the config the way Wrangler does (`wranglerConfig`, else a
+`.wrangler/deploy/config.json` redirect, else `wrangler.json` / `.jsonc` /
+`.toml`, all searched upward) after Build, and every wrangler
+command — deploy, `versions upload`, `d1 migrations apply` — takes its
+`env-flag` output. A config carrying `targetEnvironment` gets no `--env`, and
+must have been built for the target's `wranglerEnv` or the run fails before
+touching Cloudflare. Everything else keeps `--env` as before. Do not add a
+wrangler command that spells `--env` itself; a test rejects it. The consumer's
+build selects the environment — for the Vite plugin, `CLOUDFLARE_ENV` at build
+time, typically fed per target through `buildVariables` as provider-devtool
+does — and the platform only checks that it matches the target.
 
 **Mutually exclusive conditions can select nothing.** If every branch is
 conditional and none matches, the run succeeds having done nothing. Guard the

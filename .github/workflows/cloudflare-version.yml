@@ -154,6 +154,97 @@ jobs:
         run: ${{ fromJSON(inputs.deployment-policy).targets[inputs.target].commands.prepare }}
       - name: Build
         run: ${{ fromJSON(inputs.quality-policy).commands.build }}
+      # Every wrangler command in this job takes its --env fragment from here,
+      # never from the policy directly, so all of them agree.
+      #
+      # A build tool such as the Cloudflare Vite plugin emits an
+      # environment-RESOLVED wrangler.json: no `env` section, `name` already the
+      # environment's Worker name, and a top-level `targetEnvironment` naming
+      # the environment it was built for. Passing --env to that file does not
+      # select anything — wrangler warns that the env section is missing and
+      # appends "-<env>" to the name again, so a staging build deploys as
+      # "<worker>-staging-staging" and a production one moves custom domains
+      # onto a Worker with no secrets. So for a resolved config --env is
+      # dropped, after checking `targetEnvironment` against the target's
+      # wranglerEnv: a staging build must never deploy as production.
+      #
+      # The config is located the way wrangler locates it: the target's
+      # wranglerConfig when declared; otherwise wrangler.json, wrangler.jsonc,
+      # then wrangler.toml, each searched upward from the working directory,
+      # except that a `.wrangler/deploy/config.json` redirect, found the same
+      # way, wins over those. A config with no
+      # `targetEnvironment` keeps --env exactly as before. JSONC and TOML are
+      # not parsed: a file JSON.parse rejects is treated as unresolved, unless
+      # it mentions `targetEnvironment`, which fails rather than guess.
+      # `single` topology has no wrangler environment and is untouched.
+      - name: Resolve Wrangler environment
+        id: wrangler-env
+        working-directory: ${{ fromJSON(inputs.deployment-policy).workingDirectory }}
+        env:
+          REQUESTED_ENV: ${{ fromJSON(inputs.deployment-policy).topology != 'single' && fromJSON(inputs.deployment-policy).targets[inputs.target].wranglerEnv || '' }}
+          WRANGLER_CONFIG: ${{ fromJSON(inputs.deployment-policy).targets[inputs.target].wranglerConfig || '' }}
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs");
+          const path = require("node:path");
+          const requested = process.env.REQUESTED_ENV || "";
+          const output = (flag) =>
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, `env-flag=${flag}\n`);
+          const fail = (message) => {
+            console.log(`::error::${message}`);
+            process.exit(1);
+          };
+          const findUp = (name) => {
+            for (let dir = process.cwd(); ; dir = path.dirname(dir)) {
+              const candidate = path.join(dir, name);
+              if (fs.existsSync(candidate)) return candidate;
+              if (path.dirname(dir) === dir) return undefined;
+            }
+          };
+          const locate = () => {
+            if (process.env.WRANGLER_CONFIG) {
+              return path.resolve(process.env.WRANGLER_CONFIG);
+            }
+            const user = ["wrangler.json", "wrangler.jsonc", "wrangler.toml"]
+              .map(findUp)
+              .find(Boolean);
+            const redirect = findUp(".wrangler/deploy/config.json");
+            if (redirect) {
+              try {
+                const { configPath } = JSON.parse(fs.readFileSync(redirect, "utf8"));
+                if (configPath) return path.resolve(path.dirname(redirect), configPath);
+              } catch {
+                // wrangler rejects an unreadable redirect itself.
+              }
+            }
+            return user;
+          };
+          const main = () => {
+            if (requested === "") return output("");
+            const flag = `--env ${requested}`;
+            const config = locate();
+            if (!config || !fs.existsSync(config)) return output(flag);
+            const text = fs.readFileSync(config, "utf8");
+            const shown = path.relative(process.cwd(), config) || config;
+            let parsed;
+            try {
+              parsed = JSON.parse(text);
+            } catch {
+              if (/targetEnvironment/.test(text)) {
+                fail(`${shown} mentions targetEnvironment but is not plain JSON, so the environment it was built for cannot be verified. Refusing to deploy target environment "${requested}".`);
+              }
+              return output(flag);
+            }
+            const built = parsed?.targetEnvironment;
+            if (built === undefined || built === null || built === "") return output(flag);
+            if (built !== requested) {
+              fail(`${shown} was built for Wrangler environment "${built}", but this target deploys to "${requested}". Rebuild for "${requested}"; refusing to deploy one environment's build as another.`);
+            }
+            console.log(`::notice::${shown} is already resolved for Wrangler environment "${built}"; running wrangler without --env.`);
+            return output("");
+          };
+          main();
+          NODE
       - name: Collect Worker secrets
         id: worker-secrets
         if: >-
@@ -208,7 +299,7 @@ jobs:
           fromJSON(inputs.deployment-policy).d1Migrations[0] != null
         env:
           DATABASES: ${{ toJSON(fromJSON(inputs.deployment-policy).d1Migrations) }}
-          ENV_FLAG: ${{ fromJSON(inputs.deployment-policy).topology != 'single' && format('--env {0}', fromJSON(inputs.deployment-policy).targets[inputs.target].wranglerEnv) || '' }}
+          ENV_FLAG: ${{ steps.wrangler-env.outputs.env-flag }}
           CONFIG_FLAG: ${{ fromJSON(inputs.deployment-policy).targets[inputs.target].wranglerConfig != null && format('--config {0}', fromJSON(inputs.deployment-policy).targets[inputs.target].wranglerConfig) || '' }}
         run: |
           {
@@ -262,19 +353,17 @@ jobs:
           accountId: ${{ secrets.cloudflare-account-id || secrets.BURNT_CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: ${{ fromJSON(inputs.deployment-policy).workingDirectory }}
           packageManager: ${{ fromJSON(inputs.deployment-policy).packageManager }}
-          # The --env fragment is written as `topology != 'single' && … || ''`
-          # and not `topology == 'single' && '' || …`. GitHub's && / || return
-          # the last evaluated operand, and an empty string is falsy — so the
-          # second form falls through to the right-hand side every time and
-          # would always pass --env. Under single topology there is no wrangler
-          # environment to name and passing one fails the deploy.
+          # The --env fragment comes from "Resolve Wrangler environment": empty
+          # under single topology and for an environment-resolved build output.
           #
-          # --secrets-file follows the same shape. The collect step succeeds only
+          # --secrets-file is written as `cond && format(…) || ''`, never
+          # `!cond && '' || …`: GitHub's && / || return the last evaluated
+          # operand and '' is falsy, so the second form always falls through. The collect step succeeds only
           # on a deploy with a non-empty workerSecrets, so a preview never gets
           # the flag. It needs wrangler 4.74.0 or newer.
           command: >-
             ${{ inputs.operation == 'preview' && 'versions upload' || 'deploy' }}
-            ${{ fromJSON(inputs.deployment-policy).topology != 'single' && format('--env {0}', fromJSON(inputs.deployment-policy).targets[inputs.target].wranglerEnv) || '' }}
+            ${{ steps.wrangler-env.outputs.env-flag }}
             ${{ fromJSON(inputs.deployment-policy).targets[inputs.target].wranglerConfig != null && format('--config {0}', fromJSON(inputs.deployment-policy).targets[inputs.target].wranglerConfig) || '' }}
             --message=${{ inputs.version-tag }}
             --tag "${{ inputs.version-tag }}"

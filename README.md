@@ -116,6 +116,16 @@ are serialized without cancellation. Main promotion requires the default branch.
 Release prefixes route unrelated release namespaces away from deployment; malformed
 tags within the configured namespace still fail.
 
+`workingDirectory` may point at a build output that holds an
+environment-resolved `wrangler.json`, such as the Cloudflare Vite plugin's
+`dist/<worker>`. That file has no `env` section and a top-level
+`targetEnvironment`, so `--env` would make Wrangler append the environment to
+the Worker name a second time (`my-worker-staging-staging`). When the config
+Wrangler will read carries `targetEnvironment`, every wrangler command (deploy,
+`versions upload`, D1 migrations) runs without `--env`, and the run fails unless
+`targetEnvironment` equals the target's `wranglerEnv` — a staging build can
+never deploy as production. Configs without `targetEnvironment` keep `--env`.
+
 ### Service environment bundles
 
 Cloudflare deployments can reuse the service bundle shape established by
