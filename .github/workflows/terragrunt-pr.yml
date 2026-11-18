@@ -62,7 +62,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: burnt-labs/github-workflows
-          ref: f9cae4698cb8dce524eec6a29da5c6ac1593779c # unreleased
+          ref: fda228830b50c61cb92ea9e4f4247e8b69fc386a # unreleased
           path: .burnt-workflows
           persist-credentials: false
       - name: Validate policy and stack
@@ -106,7 +106,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: burnt-labs/github-workflows
-          ref: f9cae4698cb8dce524eec6a29da5c6ac1593779c # unreleased
+          ref: fda228830b50c61cb92ea9e4f4247e8b69fc386a # unreleased
           path: .burnt-workflows
           persist-credentials: false
       - name: Setup Terraform
