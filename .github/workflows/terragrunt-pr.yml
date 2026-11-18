@@ -1,0 +1,195 @@
+name: Burnt Terragrunt PR
+
+on:
+  workflow_call:
+    inputs:
+      stack:
+        description: Exact stack key from the Terragrunt policy
+        required: true
+        type: string
+      terragrunt-policy-path:
+        description: Repository-relative Terragrunt JSONC policy
+        default: .github/terragrunt-policy.jsonc
+        required: false
+        type: string
+      comment:
+        description: Post the plan summary as one sticky pull request comment
+        default: true
+        required: false
+        type: boolean
+    outputs:
+      has-changes:
+        description: Whether the plan changes any resource or output
+        value: ${{ jobs.plan.outputs.has-changes }}
+      destructive:
+        description: Whether the plan destroys or replaces any resource
+        value: ${{ jobs.plan.outputs.destructive }}
+    secrets:
+      # Optional so a caller can use `secrets: inherit` instead, which GitHub
+      # Environment secrets and policy-declared variable secrets need.
+      cloudflare-api-token:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  policy:
+    name: Terragrunt policy
+    # Fork and Dependabot pull requests receive no secrets, and drafts wait
+    # until they are ready, as in the Cloudflare PR flow.
+    if: >-
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.user.login != 'dependabot[bot]'
+    runs-on: ubicloud-standard-2
+    outputs:
+      stack: ${{ steps.policy.outputs.stack }}
+    env:
+      TERRAGRUNT_POLICY_PATH: ${{ inputs.terragrunt-policy-path }}
+      TERRAGRUNT_STACK: ${{ inputs.stack }}
+      SOURCE_EVENT: ${{ github.event_name }}
+      SOURCE_REF: ${{ github.ref }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Reserve central tools directory
+        run: test ! -e .burnt-workflows && test ! -L .burnt-workflows
+      - name: Checkout central Terragrunt tools
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: burnt-labs/github-workflows
+          ref: f9cae4698cb8dce524eec6a29da5c6ac1593779c # unreleased
+          path: .burnt-workflows
+          persist-credentials: false
+      - name: Validate policy and stack
+        id: policy
+        run: node .burnt-workflows/scripts/terragrunt.bundle.mjs resolve pr
+
+  plan:
+    name: Terragrunt plan ${{ inputs.stack }}
+    needs: policy
+    runs-on: ubicloud-standard-4
+    environment:
+      name: ${{ fromJSON(needs.policy.outputs.stack).plan.githubEnvironment }}
+    concurrency:
+      # Per pull request: plans of different pull requests are serialized by
+      # the state lock, not here. Never cancelled: a cancelled plan can leave
+      # the state lock held.
+      group: burnt-terragrunt-pr-${{ github.repository }}-${{ fromJSON(needs.policy.outputs.stack).workingDirectory }}-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write # AWS role via GitHub OIDC; no stored keys
+    outputs:
+      summary: ${{ steps.plan.outputs.summary }}
+      has-changes: ${{ steps.plan.outputs.has-changes }}
+      destructive: ${{ steps.plan.outputs.destructive }}
+    env:
+      TERRAGRUNT_POLICY_PATH: ${{ inputs.terragrunt-policy-path }}
+      TERRAGRUNT_STACK: ${{ inputs.stack }}
+      SOURCE_EVENT: ${{ github.event_name }}
+      SOURCE_REF: ${{ github.ref }}
+      SOURCE_SHA: ${{ github.sha }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Reserve central tools directory
+        run: test ! -e .burnt-workflows && test ! -L .burnt-workflows
+      - name: Checkout central Terragrunt tools
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: burnt-labs/github-workflows
+          ref: f9cae4698cb8dce524eec6a29da5c6ac1593779c # unreleased
+          path: .burnt-workflows
+          persist-credentials: false
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ fromJSON(needs.policy.outputs.stack).terraformVersion }}
+          # The wrapper rewrites stdout, and the helper parses show -json.
+          terraform_wrapper: false
+      - name: Install Terragrunt
+        # The version comes from the consumer's .terragrunt-version, which the
+        # helper validated as digits and dots. The binary must match the
+        # release's own SHA256SUMS.
+        env:
+          TERRAGRUNT_VERSION: ${{ fromJSON(needs.policy.outputs.stack).terragruntVersion }}
+        run: |
+          set -euo pipefail
+          directory="$RUNNER_TEMP/terragrunt-bin"
+          mkdir -p "$directory"
+          cd "$directory"
+          base="https://github.com/gruntwork-io/terragrunt/releases/download/v${TERRAGRUNT_VERSION}"
+          curl -fsSLo terragrunt_linux_amd64 "$base/terragrunt_linux_amd64"
+          curl -fsSLo SHA256SUMS "$base/SHA256SUMS"
+          grep -E '  terragrunt_linux_amd64$' SHA256SUMS | sha256sum -c -
+          install -m 0755 terragrunt_linux_amd64 terragrunt
+          rm -f terragrunt_linux_amd64 SHA256SUMS
+          test "$(./terragrunt --version)" = "terragrunt version v${TERRAGRUNT_VERSION}"
+          echo "$directory" >> "$GITHUB_PATH"
+      - name: Assume the plan role
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ fromJSON(needs.policy.outputs.stack).plan.awsRoleArn }}
+          aws-region: ${{ fromJSON(needs.policy.outputs.stack).awsRegion }}
+          role-session-name: terragrunt-plan-${{ github.run_id }}
+      - name: Plan
+        id: plan
+        env:
+          # The helper forwards only the names the policy declares.
+          ALL_SECRETS: ${{ toJSON(secrets) }}
+          NAMED_CLOUDFLARE_API_TOKEN: ${{ secrets.cloudflare-api-token }}
+        run: node .burnt-workflows/scripts/terragrunt.bundle.mjs plan pr
+
+  comment:
+    name: Terragrunt plan comment
+    needs: plan
+    # Also runs after a destroy/replace refusal, so the PR shows why it failed.
+    if: >-
+      always() && inputs.comment &&
+      needs.plan.result != 'skipped' && needs.plan.outputs.summary != ''
+    runs-on: ubicloud-standard-2
+    permissions:
+      contents: read
+      pull-requests: write # the sticky plan comment
+    steps:
+      - name: Update the sticky plan comment
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          PLAN_SUMMARY: ${{ needs.plan.outputs.summary }}
+          TERRAGRUNT_STACK: ${{ inputs.stack }}
+        with:
+          script: |
+            const marker = `<!-- burnt-terragrunt-plan:${process.env.TERRAGRUNT_STACK} -->`
+            const body = `${marker}\n${process.env.PLAN_SUMMARY}`
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              per_page: 100,
+            })
+            const previous = comments.find(
+              (comment) => comment.user?.type === 'Bot' && comment.body?.startsWith(marker),
+            )
+            if (previous) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: previous.id,
+                body,
+              })
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              })
+            }

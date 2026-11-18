@@ -1,0 +1,226 @@
+name: Burnt Terragrunt Main
+
+on:
+  workflow_call:
+    inputs:
+      stack:
+        description: Exact stack key from the Terragrunt policy
+        required: true
+        type: string
+      terragrunt-policy-path:
+        description: Repository-relative Terragrunt JSONC policy
+        default: .github/terragrunt-policy.jsonc
+        required: false
+        type: string
+      allow-destroy:
+        description: Apply a plan that destroys or replaces resources; accepted only on workflow_dispatch
+        default: false
+        required: false
+        type: boolean
+    outputs:
+      has-changes:
+        description: Whether the reviewed plan changed any resource or output
+        value: ${{ jobs.plan.outputs.has-changes }}
+      applied:
+        description: Whether the apply job ran and succeeded
+        value: ${{ jobs.apply.outputs.applied }}
+    secrets:
+      # Optional so a caller can use `secrets: inherit` instead, which GitHub
+      # Environment secrets and policy-declared variable secrets need.
+      cloudflare-api-token:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  policy:
+    name: Terragrunt policy
+    runs-on: ubicloud-standard-2
+    outputs:
+      stack: ${{ steps.policy.outputs.stack }}
+    env:
+      TERRAGRUNT_POLICY_PATH: ${{ inputs.terragrunt-policy-path }}
+      TERRAGRUNT_STACK: ${{ inputs.stack }}
+      TERRAGRUNT_ALLOW_DESTROY: ${{ inputs.allow-destroy }}
+      SOURCE_EVENT: ${{ github.event_name }}
+      SOURCE_REF: ${{ github.ref }}
+      SOURCE_SHA: ${{ github.sha }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Reserve central tools directory
+        run: test ! -e .burnt-workflows && test ! -L .burnt-workflows
+      - name: Checkout central Terragrunt tools
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: burnt-labs/github-workflows
+          ref: f9cae4698cb8dce524eec6a29da5c6ac1593779c # unreleased
+          path: .burnt-workflows
+          persist-credentials: false
+      - name: Validate policy and stack
+        id: policy
+        run: node .burnt-workflows/scripts/terragrunt.bundle.mjs resolve main
+
+  plan:
+    name: Terragrunt plan ${{ inputs.stack }}
+    needs: policy
+    runs-on: ubicloud-standard-4
+    environment:
+      name: ${{ fromJSON(needs.policy.outputs.stack).plan.githubEnvironment }}
+    concurrency:
+      # Kept apart from pull-request plans: GitHub drops an older pending job
+      # when a newer one joins its group, and a dropped main plan would skip
+      # the apply. Never cancelled: a cancelled plan can leave the lock held.
+      group: burnt-terragrunt-main-plan-${{ github.repository }}-${{ fromJSON(needs.policy.outputs.stack).workingDirectory }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write # AWS role via GitHub OIDC; no stored keys
+    outputs:
+      fingerprint: ${{ steps.plan.outputs.fingerprint }}
+      has-changes: ${{ steps.plan.outputs.has-changes }}
+      destructive: ${{ steps.plan.outputs.destructive }}
+    env:
+      TERRAGRUNT_POLICY_PATH: ${{ inputs.terragrunt-policy-path }}
+      TERRAGRUNT_STACK: ${{ inputs.stack }}
+      TERRAGRUNT_ALLOW_DESTROY: ${{ inputs.allow-destroy }}
+      SOURCE_EVENT: ${{ github.event_name }}
+      SOURCE_REF: ${{ github.ref }}
+      SOURCE_SHA: ${{ github.sha }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Reserve central tools directory
+        run: test ! -e .burnt-workflows && test ! -L .burnt-workflows
+      - name: Checkout central Terragrunt tools
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: burnt-labs/github-workflows
+          ref: f9cae4698cb8dce524eec6a29da5c6ac1593779c # unreleased
+          path: .burnt-workflows
+          persist-credentials: false
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ fromJSON(needs.policy.outputs.stack).terraformVersion }}
+          # The wrapper rewrites stdout, and the helper parses show -json.
+          terraform_wrapper: false
+      - name: Install Terragrunt
+        # The version comes from the consumer's .terragrunt-version, which the
+        # helper validated as digits and dots. The binary must match the
+        # release's own SHA256SUMS.
+        env:
+          TERRAGRUNT_VERSION: ${{ fromJSON(needs.policy.outputs.stack).terragruntVersion }}
+        run: |
+          set -euo pipefail
+          directory="$RUNNER_TEMP/terragrunt-bin"
+          mkdir -p "$directory"
+          cd "$directory"
+          base="https://github.com/gruntwork-io/terragrunt/releases/download/v${TERRAGRUNT_VERSION}"
+          curl -fsSLo terragrunt_linux_amd64 "$base/terragrunt_linux_amd64"
+          curl -fsSLo SHA256SUMS "$base/SHA256SUMS"
+          grep -E '  terragrunt_linux_amd64$' SHA256SUMS | sha256sum -c -
+          install -m 0755 terragrunt_linux_amd64 terragrunt
+          rm -f terragrunt_linux_amd64 SHA256SUMS
+          test "$(./terragrunt --version)" = "terragrunt version v${TERRAGRUNT_VERSION}"
+          echo "$directory" >> "$GITHUB_PATH"
+      - name: Assume the plan role
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ fromJSON(needs.policy.outputs.stack).plan.awsRoleArn }}
+          aws-region: ${{ fromJSON(needs.policy.outputs.stack).awsRegion }}
+          role-session-name: terragrunt-plan-${{ github.run_id }}
+      - name: Plan
+        id: plan
+        env:
+          # The helper forwards only the names the policy declares.
+          ALL_SECRETS: ${{ toJSON(secrets) }}
+          NAMED_CLOUDFLARE_API_TOKEN: ${{ secrets.cloudflare-api-token }}
+        run: node .burnt-workflows/scripts/terragrunt.bundle.mjs plan main
+
+  apply:
+    name: Terragrunt apply ${{ inputs.stack }}
+    needs: [policy, plan]
+    # Nothing to apply means no approval request. The plan job already failed
+    # on a destroy or replace unless allow-destroy was given on a dispatch.
+    if: needs.plan.outputs.has-changes == 'true'
+    runs-on: ubicloud-standard-4
+    environment:
+      name: ${{ fromJSON(needs.policy.outputs.stack).apply.githubEnvironment }}
+    concurrency:
+      # Applies are never cancelled; a queued apply waits for the running one.
+      group: burnt-terragrunt-apply-${{ github.repository }}-${{ fromJSON(needs.policy.outputs.stack).workingDirectory }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write # AWS role via GitHub OIDC; no stored keys
+    outputs:
+      applied: ${{ steps.apply.outcome == 'success' }}
+    env:
+      TERRAGRUNT_POLICY_PATH: ${{ inputs.terragrunt-policy-path }}
+      TERRAGRUNT_STACK: ${{ inputs.stack }}
+      TERRAGRUNT_ALLOW_DESTROY: ${{ inputs.allow-destroy }}
+      SOURCE_EVENT: ${{ github.event_name }}
+      SOURCE_REF: ${{ github.ref }}
+      SOURCE_SHA: ${{ github.sha }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Reserve central tools directory
+        run: test ! -e .burnt-workflows && test ! -L .burnt-workflows
+      - name: Checkout central Terragrunt tools
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: burnt-labs/github-workflows
+          ref: f9cae4698cb8dce524eec6a29da5c6ac1593779c # unreleased
+          path: .burnt-workflows
+          persist-credentials: false
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ fromJSON(needs.policy.outputs.stack).terraformVersion }}
+          # The wrapper rewrites stdout, and the helper parses show -json.
+          terraform_wrapper: false
+      - name: Install Terragrunt
+        # The version comes from the consumer's .terragrunt-version, which the
+        # helper validated as digits and dots. The binary must match the
+        # release's own SHA256SUMS.
+        env:
+          TERRAGRUNT_VERSION: ${{ fromJSON(needs.policy.outputs.stack).terragruntVersion }}
+        run: |
+          set -euo pipefail
+          directory="$RUNNER_TEMP/terragrunt-bin"
+          mkdir -p "$directory"
+          cd "$directory"
+          base="https://github.com/gruntwork-io/terragrunt/releases/download/v${TERRAGRUNT_VERSION}"
+          curl -fsSLo terragrunt_linux_amd64 "$base/terragrunt_linux_amd64"
+          curl -fsSLo SHA256SUMS "$base/SHA256SUMS"
+          grep -E '  terragrunt_linux_amd64$' SHA256SUMS | sha256sum -c -
+          install -m 0755 terragrunt_linux_amd64 terragrunt
+          rm -f terragrunt_linux_amd64 SHA256SUMS
+          test "$(./terragrunt --version)" = "terragrunt version v${TERRAGRUNT_VERSION}"
+          echo "$directory" >> "$GITHUB_PATH"
+      - name: Assume the apply role
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ fromJSON(needs.policy.outputs.stack).apply.awsRoleArn }}
+          aws-region: ${{ fromJSON(needs.policy.outputs.stack).awsRegion }}
+          role-session-name: terragrunt-apply-${{ github.run_id }}
+      - name: Plan, check against the reviewed plan, and apply the saved plan
+        id: apply
+        env:
+          REVIEWED_FINGERPRINT: ${{ needs.plan.outputs.fingerprint }}
+          # The helper forwards only the names the policy declares.
+          ALL_SECRETS: ${{ toJSON(secrets) }}
+          NAMED_CLOUDFLARE_API_TOKEN: ${{ secrets.cloudflare-api-token }}
+        run: node .burnt-workflows/scripts/terragrunt.bundle.mjs apply main

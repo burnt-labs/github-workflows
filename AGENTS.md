@@ -85,7 +85,7 @@ These are not preferences. Changes that break them will be rejected.
 
 ## The flows
 
-Twelve workflows. Ten are entry points; two are internal.
+Fourteen workflows. Twelve are entry points; two are internal.
 
 | Workflow                 | Called by                   | Purpose                                           |
 | ------------------------ | --------------------------- | ------------------------------------------------- |
@@ -99,6 +99,8 @@ Twelve workflows. Ten are entry points; two are internal.
 | `npm-changesets.yml`     | consumer, on push to main   | Changesets version PR, multi-package publish      |
 | `phala-deploy.yml`       | consumer                    | Build and deploy a Phala CVM target               |
 | `modal-deploy.yml`       | consumer                    | Deploy a reviewed Modal target and existing image |
+| `terragrunt-pr.yml`      | consumer, on `pull_request` | Terragrunt plan, sticky PR comment                |
+| `terragrunt-main.yml`    | consumer, push or dispatch  | Plan, then approved apply of that plan            |
 | `cloudflare-version.yml` | internal                    | One `wrangler versions upload` or `deploy`        |
 | `npm-publish.yml`        | internal                    | One `npm publish` via OIDC trusted publishing     |
 
@@ -129,6 +131,21 @@ ancestry on push/dispatch, and exposes Modal credentials only to the final deplo
 import. No consumer rollout or release is implied. Rebuild `modal.bundle.mjs`
 with `pnpm build` and advance the new workflow's tool pins in a separate signed
 commit before releasing.
+
+### terragrunt-policy.jsonc
+
+Terragrunt plan/apply reads its own capped JSONC policy, validated by
+`terragrunt.bundle.mjs` like Modal's, not by `scripts/policy.mjs`. Each stack
+names its working directory, AWS region, a plan stage and an apply stage
+(each a distinct real GitHub Environment plus an OIDC role ARN), an optional
+Cloudflare token secret name and per-stage `TF_VAR_` secret names. Tool
+versions come from the consumer's `.terraform-version` and
+`.terragrunt-version`. The apply job never takes a plan file from another job:
+plan files embed state and variable values, and artifacts are readable by every
+repository reader. It re-plans and must match the reviewed plan's fingerprint.
+Contract, callers and failure modes: [docs/terragrunt.md](docs/terragrunt.md).
+Rebuild `terragrunt.bundle.mjs` with `pnpm build`, and advance both workflows'
+helper `ref:` pins together in a separate signed commit.
 
 ### phala-policy.jsonc
 

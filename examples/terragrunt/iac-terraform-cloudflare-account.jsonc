@@ -1,0 +1,30 @@
+{
+  // Proposed declaration for burnt-labs/iac-terraform (DO-577). Not installed
+  // in the consumer by this change. The two GitHub Environments and the two
+  // roles do not exist yet; their names here are proposals.
+  "schemaVersion": 1,
+  "stacks": {
+    "cloudflare-account": {
+      "workingDirectory": "cloudflare/account",
+      "awsRegion": "us-east-1",
+      // Each environment holds its own CLOUDFLARE_API_TOKEN: read on plan,
+      // edit on apply.
+      "credentials": { "cloudflareApiTokenSecret": "CLOUDFLARE_API_TOKEN" },
+      "plan": {
+        // No required reviewer, so pull-request plans do not wait.
+        "githubEnvironment": "cloudflare-account-plan",
+        "awsRoleArn": "arn:aws:iam::669419973271:role/github-iac-terraform-cloudflare-account-plan",
+        "lock": true,
+        "failOnDestroyOrReplace": true,
+      },
+      "apply": {
+        // Required reviewer: every apply is one explicit approval.
+        "githubEnvironment": "cloudflare-account",
+        "awsRoleArn": "arn:aws:iam::669419973271:role/github-iac-terraform-cloudflare-account-apply",
+        "variableSecrets": {
+          "satya_proof_index_catalog_token": "SATYA_PROOF_INDEX_CATALOG_TOKEN",
+        },
+      },
+    },
+  },
+}

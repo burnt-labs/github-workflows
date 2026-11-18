@@ -15,6 +15,8 @@ Consumers define:
 - `.github/npm-policy.jsonc` for npm packages
 - `.github/phala-policy.jsonc` for Phala CVM deployments
 - `.github/modal-policy.jsonc` for reviewed Modal deployments of existing images
+- `.github/terragrunt-policy.jsonc` for Terragrunt plan on pull requests and
+  approved apply from the default branch
 
 Modal's capped schema, credential boundary, exact zk-email-prover migration
 example and release/adoption prerequisites are in [docs/modal.md](docs/modal.md).
@@ -559,6 +561,38 @@ The workflow's `deployment-url` output is the boundary for consumer-specific
 orchestration. A caller that needs to store the URL or redeploy another service
 does so in its own downstream job; the reusable workflow never mutates those
 resources itself.
+
+## Terragrunt
+
+`terragrunt-pr.yml` plans a Terragrunt stack on a pull request and keeps one
+sticky plan comment per stack. `terragrunt-main.yml` plans the default branch
+and, when the plan changes something, applies it after one approval on the
+stack's protected apply environment. AWS access is GitHub OIDC only; the
+Cloudflare token and any `TF_VAR_` secrets are GitHub Environment secrets the
+policy names. Versions come from the consumer's `.terraform-version` and
+`.terragrunt-version`.
+
+- Any destroy or replace fails the plan job (`failOnDestroyOrReplace`, default
+  true) and is refused by apply unless `allow-destroy` is set on a manual
+  dispatch.
+- Apply never receives a plan file from another job. It plans again into a
+  saved plan, refuses unless that plan's fingerprint matches the plan the run
+  showed before approval, and applies exactly that file.
+- Plan and apply must use different GitHub Environments, so pull-request code
+  never sees apply credentials.
+
+Schema, callers, the destroy/replace rules, the fingerprint and the credential
+boundary are in [docs/terragrunt.md](docs/terragrunt.md). Callers are config
+only:
+
+```yaml
+jobs:
+  terragrunt:
+    uses: burnt-labs/github-workflows/.github/workflows/terragrunt-pr.yml@<released-full-sha> # vX.Y.Z
+    with:
+      stack: cloudflare-account
+    secrets: inherit
+```
 
 ## Frontend builds
 
