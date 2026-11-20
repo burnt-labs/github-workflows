@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import {
   materializePublicConfiguration,
   materializeWorkerSecrets,
@@ -8,7 +9,14 @@ try {
   const options = {
     policy: JSON.parse(process.env.DEPLOYMENT_POLICY),
     target: process.env.TARGET,
-    bundle: process.env.ENVIRONMENT_JSON,
+    // A 1Password-sourced policy has no bundle secret: the loader wrote the same
+    // {vars, secrets} shape to a private file instead.
+    bundle:
+      process.env.ENVIRONMENT_JSON ||
+      (process.env.ENVIRONMENT_JSON_FILE &&
+      fs.existsSync(process.env.ENVIRONMENT_JSON_FILE)
+        ? fs.readFileSync(process.env.ENVIRONMENT_JSON_FILE, "utf8")
+        : undefined),
     root: process.env.GITHUB_WORKSPACE,
     runnerTemp: process.env.RUNNER_TEMP,
     operation: process.env.OPERATION,
