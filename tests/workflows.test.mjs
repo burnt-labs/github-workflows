@@ -1874,3 +1874,132 @@ test("measured public configuration is substituted without rejecting environment
   assert(result.includes('METRICS_URL: "https://metrics.example"'));
   assert(!result.includes("${METRICS_URL"));
 });
+
+test("Phala reseal is an operation of the one Phala flow, manual and policy-gated", () => {
+  assert.ok(!fs.existsSync(`${directory}/phala-reseal.yml`));
+  const source = fs.readFileSync(`${directory}/phala-deploy.yml`, "utf8");
+  const workflow = parse(source);
+  const validate = workflow.jobs.validate.steps.find(
+    (step) => step.name === "Validate operation",
+  );
+  assert.match(validate.run, /setup\|update\|reseal\)/);
+  assert.match(
+    validate.run,
+    /requires a manual run from the caller's default branch/,
+  );
+  assert.match(
+    validate.run,
+    /operation must be deploy, update, setup or reseal/,
+  );
+  assert.equal(workflow.jobs.reseal.needs, "policy");
+  assert.equal(workflow.jobs.reseal.if, "inputs.operation == 'reseal'");
+  assert.equal(workflow.jobs.deploy.if, "inputs.operation != 'reseal'");
+  assert.equal(workflow.jobs.quality.if, "inputs.operation != 'reseal'");
+  assert.match(
+    workflow.jobs.reseal.environment.name,
+    /targets\[inputs\.target\]\.githubEnvironment/,
+  );
+  for (const output of ["app-id", "deployment-url"])
+    assert.equal(
+      workflow.on.workflow_call.outputs[output].value,
+      `\${{ jobs.deploy.outputs.${output} || jobs.reseal.outputs.${output} }}`,
+    );
+});
+
+test("Phala reseal shares the deploy's per-CVM queue and never cancels", () => {
+  const workflow = parse(
+    fs.readFileSync(`${directory}/phala-deploy.yml`, "utf8"),
+  );
+  assert.equal(
+    workflow.jobs.reseal.concurrency.group,
+    workflow.jobs.deploy.concurrency.group,
+  );
+  assert.equal(workflow.jobs.reseal.concurrency["cancel-in-progress"], false);
+});
+
+test("Phala reseal builds nothing and runs only the pinned central tool", () => {
+  const workflow = parse(
+    fs.readFileSync(`${directory}/phala-deploy.yml`, "utf8"),
+  );
+  const job = workflow.jobs.reseal;
+  const source = JSON.stringify(job);
+  assert.doesNotMatch(source, /build-push-action|docker\/login-action|npx /);
+  assert.equal(job.permissions, undefined);
+  const tools = job.steps.find(
+    (step) => step.with?.path === ".burnt-phala-tools",
+  );
+  assert.match(tools.with.ref, /^[0-9a-f]{40}$/);
+  assert.equal(tools.with["persist-credentials"], false);
+  const run = job.steps.find((step) => step.id === "reseal");
+  assert.equal(run.run, "node .burnt-phala-tools/scripts/phala-reseal-cli.mjs");
+  assert.match(run.env.ALL_SECRETS, /toJSON\(secrets\)/);
+});
+
+test("Phala reseal health checks fail closed", () => {
+  const workflow = parse(
+    fs.readFileSync(`${directory}/phala-deploy.yml`, "utf8"),
+  );
+  const health = workflow.jobs.reseal.steps.find(
+    (step) => step.name === "Verify health",
+  );
+  assert.match(
+    health.env.DEPLOYMENT_URL,
+    /steps\.reseal\.outputs\.deployment-url/,
+  );
+  assert.match(health.run, /curl --fail/);
+  assert.match(health.run, /exit 1$/m);
+});
+
+test("Phala deploys a prebuilt image only by an explicit, pullable digest", () => {
+  const workflow = parse(
+    fs.readFileSync(`${directory}/phala-deploy.yml`, "utf8"),
+  );
+  assert.equal(workflow.on.workflow_call.inputs["image-digest"].default, "");
+  const steps = workflow.jobs.deploy.steps;
+  const resolve = steps.find((step) => step.id === "image");
+  assert.match(resolve.env.IMAGE_REPOSITORY, /image\.repository/);
+  assert.match(resolve.run, /\^sha256:\[0-9a-f\]\{64\}\$/);
+  assert.match(
+    resolve.run,
+    /image-digest applies only to a policy whose image\.repository/,
+  );
+  for (const name of [
+    "Setup Docker Buildx",
+    "Login to GHCR for push",
+    "Build and push image",
+  ])
+    assert.equal(
+      steps.find((step) => step.name === name).if,
+      "steps.image.outputs.prebuilt != 'true'",
+      name,
+    );
+  const verify = steps.find(
+    (step) => step.name === "Verify the prebuilt image",
+  );
+  assert.equal(verify.if, "steps.image.outputs.prebuilt == 'true'");
+  assert.match(verify.run, /proveRegistryAccess/);
+  assert.match(verify.env.REGISTRY_PASSWORD_NAME, /registryPasswordSecret/);
+  const verifyIndex = steps.indexOf(verify);
+  for (const name of [
+    "Render the compose file",
+    "Deploy CVM",
+    "Apply explicit Phala operation",
+  ])
+    assert.ok(
+      steps.findIndex((step) => step.name === name) > verifyIndex,
+      name,
+    );
+  const consumers = steps.filter((step) =>
+    step.env?.IMAGE_DIGEST?.includes("steps.build"),
+  );
+  assert.deepEqual(
+    consumers.map((step) => step.name),
+    ["Render the compose file", "Apply explicit Phala operation"],
+  );
+  for (const step of consumers)
+    assert.equal(
+      step.env.IMAGE_DIGEST,
+      "${{ steps.build.outputs.digest || steps.image.outputs.digest }}",
+      step.name,
+    );
+});

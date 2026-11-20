@@ -543,6 +543,14 @@ and update-only runs queue instead of canceling active work. Legacy `deploy`
 calls retain their cancellation behavior, so pause automatic deployments while
 performing first-time setup. No consumer pins are advanced automatically.
 
+An image built elsewhere (a Nix or release pipeline of its own) is deployed
+instead of built: policy names `image.repository` (`ghcr.io/<owner>/<image>`)
+and drops `context`, `dockerfile` and `name`, and the caller passes the
+`image-digest` input (`sha256:<64 hex>`). The flow then builds nothing, proves
+the registry login pulls that exact digest, and renders it into the compose
+exactly as it renders a built one. A digest without `image.repository`, or the
+reverse, fails before anything is deployed.
+
 `image.composeVariable` is substituted into the compose file before the deploy,
 by digest, so the compose hash dstack measures names the exact image running. It
 is not delivered to the CVM as an environment variable. The compose hash
@@ -559,6 +567,58 @@ The workflow's `deployment-url` output is the boundary for consumer-specific
 orchestration. A caller that needs to store the URL or redeploy another service
 does so in its own downstream job; the reusable workflow never mutates those
 resources itself.
+
+### Resealing an existing CVM
+
+`operation: reseal` re-applies a CVM's sealed environment from the same policy and
+restarts it, with no quality run, no image build and no compose change, so the
+attested identity stays. Use it when a sealed value changed outside a deploy. The
+usual case is a rotated registry password: Phala logs in to the registry only at
+boot, so the next reboot stops at `pre-launch` with `docker login failed` until
+the CVM is resealed.
+
+One caller per repository covers every operation; offer the ones the repository
+uses:
+
+```yaml
+name: Phala
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        required: true
+        type: choice
+        options: [candidate, release]
+      operation:
+        required: true
+        type: choice
+        options: [update, reseal]
+
+permissions:
+  contents: read
+  deployments: write
+  packages: write
+
+jobs:
+  phala:
+    uses: burnt-labs/github-workflows/.github/workflows/phala-deploy.yml@<sha> # vX.Y.Z
+    with:
+      target: ${{ inputs.target }}
+      operation: ${{ inputs.operation }}
+    secrets: inherit
+```
+
+Phala replaces the whole sealed environment and cannot read it back, so the
+reseal writes exactly the names the CVM's compose allows (`allowed_envs`), each
+from policy: `runtimeSecrets`, `runtimeVariables`, and `DSTACK_DOCKER_*` from
+`image.registry`, `image.registryUsername` and `credentials.registryPasswordSecret`.
+It fails closed when the CVM allows a name policy does not declare, when only
+part of the registry login is sealed, or when a value is unset. Before sealing a
+registry login it proves the login pulls every digest-pinned image the CVM uses
+from that registry. Like setup and update it runs only by manual dispatch from
+the default branch; it finds the one CVM named by the target, queues behind
+deploys in the same per-CVM concurrency group, then restarts and health-checks it.
 
 ## Frontend builds
 

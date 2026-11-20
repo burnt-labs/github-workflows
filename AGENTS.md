@@ -83,6 +83,28 @@ These are not preferences. Changes that break them will be rejected.
 - Store repository-specific configuration in JSONC policy files.
 - Open pull requests as drafts.
 
+## One flow per platform
+
+Every repository on a platform goes through that platform's one entry flow
+here. Do not undo this, and do not route around it. Phala consumers and their
+migration status are in `.agents/plans/phala-single-flow.md`:
+
+- **A new need is a new operation of the existing flow, never a new workflow
+  file.** A second shared workflow for one task only moves a bespoke file into
+  this repository. Phala has one flow, `phala-deploy.yml`, whose `operation`
+  input deploys, sets up, updates and reseals; the next Phala task becomes
+  another operation there.
+- **A consumer repository holds policy and one thin caller per platform**, no
+  deploy scripts, no CLI calls, no inline credential handling. The caller passes
+  `operation` through as a choice so one file covers every operation.
+- **Never add or extend a repository-local deploy path, even to unblock an
+  outage.** Close the gap here and have the caller use it. A repository still on
+  a bespoke flow is migration debt: move it onto the shared flow; never copy its
+  bespoke pattern into another repository or reintroduce one that was removed.
+- **Repo-shaped follow-ups** (acceptance checks, measurement pull requests,
+  writing a URL into another service) stay in the consumer as downstream jobs
+  fed by the flow's outputs. They never re-implement build, deploy or sealing.
+
 ## The flows
 
 Twelve workflows. Ten are entry points; two are internal.
@@ -97,7 +119,7 @@ Twelve workflows. Ten are entry points; two are internal.
 | `npm-main.yml`           | consumer, on push to main   | Publish the candidate dist-tag, release drafts    |
 | `npm-release.yml`        | consumer, on `release`      | Publish the release dist-tag                      |
 | `npm-changesets.yml`     | consumer, on push to main   | Changesets version PR, multi-package publish      |
-| `phala-deploy.yml`       | consumer                    | Build and deploy a Phala CVM target               |
+| `phala-deploy.yml`       | consumer                    | Deploy, set up, update or reseal a Phala CVM      |
 | `modal-deploy.yml`       | consumer                    | Deploy a reviewed Modal target and existing image |
 | `cloudflare-version.yml` | internal                    | One `wrangler versions upload` or `deploy`        |
 | `npm-publish.yml`        | internal                    | One `npm publish` via OIDC trusted publishing     |
@@ -174,6 +196,14 @@ orchestration.
 
 The image is always tagged with the deploying commit SHA and pushed to GHCR.
 The Actions job token pushes it.
+
+An image built elsewhere (a Nix or release pipeline of its own) is deployed
+instead of built: policy names `image.repository` (`ghcr.io/<owner>/<image>`)
+and drops `context`, `dockerfile` and `name`, and the caller passes the
+`image-digest` input (`sha256:<64 hex>`). The flow then builds nothing, proves
+the registry login pulls that exact digest, and renders it into the compose
+exactly as it renders a built one. A digest without `image.repository`, or the
+reverse, fails before anything is deployed.
 
 `image.composeVariable` is expanded into the compose file before the deploy,
 not delivered to the CVM as an environment variable. dstack hashes the compose

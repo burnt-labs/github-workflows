@@ -555,10 +555,12 @@ export function validatePhalaPolicy(policy) {
   if (!policy.image || typeof policy.image !== "object") {
     throw new Error("Phala image must be an object");
   }
+  // An image built elsewhere names its full repository and is deployed by the
+  // digest the caller passes; the flow then builds nothing, so it takes no
+  // build context, Dockerfile or name.
+  const prebuilt = policy.image.repository !== undefined;
   for (const field of [
-    "context",
-    "dockerfile",
-    "name",
+    ...(prebuilt ? [] : ["context", "dockerfile", "name"]),
     "composeVariable",
     "registryUsername",
   ]) {
@@ -568,7 +570,23 @@ export function validatePhalaPolicy(policy) {
     throw new Error("Phala image.registry must equal ghcr.io");
   }
   const imageComponent = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
-  if (
+  if (prebuilt) {
+    requireString(policy.image.repository, "Phala image.repository");
+    const [registry, ...path] = policy.image.repository.split("/");
+    if (
+      registry !== policy.image.registry ||
+      path.length < 2 ||
+      !path.every((part) => imageComponent.test(part))
+    )
+      throw new Error(
+        "Phala image.repository must be a lowercase ghcr.io/<owner>/<image> path",
+      );
+    for (const field of ["context", "dockerfile", "name"])
+      if (policy.image[field] !== undefined)
+        throw new Error(
+          `Phala image.${field} does not apply to a prebuilt image.repository`,
+        );
+  } else if (
     !policy.image.name.split("/").every((part) => imageComponent.test(part))
   ) {
     throw new Error(
