@@ -8,20 +8,20 @@ on:
         required: true
         type: string
       operation:
-        description: deploy preserves candidate auto-creation; update requires an existing CVM; setup explicitly creates an absent CVM
+        description: deploy preserves candidate auto-creation; update requires an existing CVM; setup explicitly creates an absent CVM; reseal re-applies an existing CVM's sealed environment from policy and restarts it, with no build
         required: false
         default: deploy
         type: string
     outputs:
       app-id:
         description: Exact app identity for explicit setup/update acceptance
-        value: ${{ jobs.deploy.outputs.app-id }}
+        value: ${{ jobs.deploy.outputs.app-id || jobs.reseal.outputs.app-id }}
       compose-hash:
         description: Platform-reported compose hash for explicit setup/update acceptance
         value: ${{ jobs.deploy.outputs.compose-hash }}
       deployment-url:
         description: Public HTTPS endpoint that passed the health check (the target's publicUrl when set, otherwise the one Phala reports)
-        value: ${{ jobs.deploy.outputs.deployment-url }}
+        value: ${{ jobs.deploy.outputs.deployment-url || jobs.reseal.outputs.deployment-url }}
 
 permissions:
   contents: read
@@ -44,13 +44,13 @@ jobs:
         run: |
           case "$PHALA_OPERATION" in
             deploy) ;;
-            setup|update)
+            setup|update|reseal)
               if [ "$GITHUB_EVENT_NAME" != workflow_dispatch ] || [ -z "$DEFAULT_BRANCH" ] || [ "$GITHUB_REF" != "refs/heads/$DEFAULT_BRANCH" ]; then
-                echo "::error::setup requires a manual run from the caller's default branch"
+                echo "::error::$PHALA_OPERATION requires a manual run from the caller's default branch"
                 exit 1
               fi
               ;;
-            *) echo "::error::operation must be deploy, update or setup"; exit 1 ;;
+            *) echo "::error::operation must be deploy, update, setup or reseal"; exit 1 ;;
           esac
 
   policy:
@@ -74,11 +74,14 @@ jobs:
 
   quality:
     needs: policy
+    # A reseal builds nothing, so there is no consumer code to gate.
+    if: inputs.operation != 'reseal'
     uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@18ac34fe76ba39f6712cb9a6e503ad3cf5e57949 # unreleased
 
   deploy:
     name: Phala ${{ inputs.target }}
     needs: [policy, quality]
+    if: inputs.operation != 'reseal'
     runs-on: ubicloud-standard-8
     environment:
       name: ${{ fromJSON(needs.policy.outputs.phala).targets[inputs.target].githubEnvironment }}
@@ -419,3 +422,61 @@ jobs:
       - name: Remove temporary deployment credentials
         if: ${{ always() }}
         run: rm -f "$RUNNER_TEMP/phala-api-key" "$RUNNER_TEMP/phala.env" "$RUNNER_TEMP/phala-target.json"
+
+  reseal:
+    # Re-applies an existing CVM's sealed environment from policy and restarts it. No image
+    # build and no compose change, so the CVM keeps its attested identity. For a sealed value
+    # that changed outside a deploy, such as a rotated registry password: Phala logs in to
+    # the registry only at boot, so the next reboot stops at `pre-launch` with
+    # "docker login failed" until the CVM is resealed.
+    name: Phala reseal ${{ inputs.target }}
+    needs: policy
+    if: inputs.operation == 'reseal'
+    runs-on: ubicloud-standard-2
+    environment:
+      name: ${{ fromJSON(needs.policy.outputs.phala).targets[inputs.target].githubEnvironment }}
+      url: ${{ steps.reseal.outputs.deployment-url }}
+    # The deploy job's group: a reseal never overlaps a deploy of the same CVM.
+    concurrency:
+      group: phala-${{ github.repository }}-${{ fromJSON(needs.policy.outputs.phala).targets[inputs.target].cvmName }}
+      cancel-in-progress: false
+    outputs:
+      app-id: ${{ steps.reseal.outputs.app-id }}
+      deployment-url: ${{ steps.reseal.outputs.deployment-url }}
+    steps:
+      - name: Setup Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: lts/*
+      - name: Checkout central reseal tools
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: burnt-labs/github-workflows
+          ref: 92c89dfc27e166225410ec949586c023e2671ba9 # unreleased
+          path: .burnt-phala-tools
+          persist-credentials: false
+      - name: Reseal and restart the CVM
+        id: reseal
+        env:
+          ALL_SECRETS: ${{ toJSON(secrets) }}
+          ALL_VARIABLES: ${{ toJSON(vars) }}
+          PHALA_POLICY: ${{ needs.policy.outputs.phala }}
+          TARGET_ROLE: ${{ inputs.target }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: node .burnt-phala-tools/scripts/phala-reseal-cli.mjs
+      - name: Verify health
+        env:
+          DEPLOYMENT_URL: ${{ steps.reseal.outputs.deployment-url }}
+          HEALTHCHECK_PATH: ${{ fromJSON(needs.policy.outputs.phala).healthcheckPath }}
+        run: |
+          # A restart pulls the image and boots the app, so allow longer than a deploy.
+          for attempt in $(seq 1 60); do
+            if curl --fail --show-error --silent --max-time 10 "${DEPLOYMENT_URL}${HEALTHCHECK_PATH}" >/dev/null; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 60 ]; then
+              sleep 15
+            fi
+          done
+          echo "::error::Phala reseal health check failed after 60 attempts"
+          exit 1

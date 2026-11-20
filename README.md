@@ -562,15 +562,18 @@ resources itself.
 
 ### Resealing an existing CVM
 
-`phala-reseal.yml` re-applies a CVM's sealed environment from the same policy and
-restarts it, with no image build and no compose change, so the attested identity
-stays. Use it when a sealed value changed outside a deploy. The usual case is a
-rotated registry password: Phala logs in to the registry only at boot, so the
-next reboot stops at `pre-launch` with `docker login failed` until the CVM is
-resealed.
+`operation: reseal` re-applies a CVM's sealed environment from the same policy and
+restarts it, with no quality run, no image build and no compose change, so the
+attested identity stays. Use it when a sealed value changed outside a deploy. The
+usual case is a rotated registry password: Phala logs in to the registry only at
+boot, so the next reboot stops at `pre-launch` with `docker login failed` until
+the CVM is resealed.
+
+One caller per repository covers every operation; offer the ones the repository
+uses:
 
 ```yaml
-name: Phala Reseal
+name: Phala
 
 on:
   workflow_dispatch:
@@ -579,15 +582,22 @@ on:
         required: true
         type: choice
         options: [candidate, release]
+      operation:
+        required: true
+        type: choice
+        options: [update, reseal]
 
 permissions:
   contents: read
+  deployments: write
+  packages: write
 
 jobs:
-  reseal:
-    uses: burnt-labs/github-workflows/.github/workflows/phala-reseal.yml@<sha> # vX.Y.Z
+  phala:
+    uses: burnt-labs/github-workflows/.github/workflows/phala-deploy.yml@<sha> # vX.Y.Z
     with:
       target: ${{ inputs.target }}
+      operation: ${{ inputs.operation }}
     secrets: inherit
 ```
 
@@ -598,9 +608,9 @@ from policy: `runtimeSecrets`, `runtimeVariables`, and `DSTACK_DOCKER_*` from
 It fails closed when the CVM allows a name policy does not declare, when only
 part of the registry login is sealed, or when a value is unset. Before sealing a
 registry login it proves the login pulls every digest-pinned image the CVM uses
-from that registry. It runs only by manual dispatch from the default branch,
-finds the one CVM named by the target, queues behind deploys in the same per-CVM
-concurrency group, then restarts and health-checks it.
+from that registry. Like setup and update it runs only by manual dispatch from
+the default branch; it finds the one CVM named by the target, queues behind
+deploys in the same per-CVM concurrency group, then restarts and health-checks it.
 
 ## Frontend builds
 

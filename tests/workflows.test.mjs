@@ -1875,59 +1875,69 @@ test("measured public configuration is substituted without rejecting environment
   assert(!result.includes("${METRICS_URL"));
 });
 
-test("Phala reseal is manual, policy-gated and runs in the caller's real environment", () => {
-  const source = fs.readFileSync(`${directory}/phala-reseal.yml`, "utf8");
+test("Phala reseal is an operation of the one Phala flow, manual and policy-gated", () => {
+  assert.ok(!fs.existsSync(`${directory}/phala-reseal.yml`));
+  const source = fs.readFileSync(`${directory}/phala-deploy.yml`, "utf8");
   const workflow = parse(source);
-  assert.deepEqual(Object.keys(workflow.on), ["workflow_call"]);
-  assert.match(source, /target must be candidate or release/);
-  assert.match(
-    source,
-    /reseal requires a manual run from the caller's default branch/,
+  const validate = workflow.jobs.validate.steps.find(
+    (step) => step.name === "Validate operation",
   );
-  assert.match(workflow.jobs.policy.steps.at(-1).run, /--phala/);
+  assert.match(validate.run, /setup\|update\|reseal\)/);
+  assert.match(
+    validate.run,
+    /requires a manual run from the caller's default branch/,
+  );
+  assert.match(
+    validate.run,
+    /operation must be deploy, update, setup or reseal/,
+  );
   assert.equal(workflow.jobs.reseal.needs, "policy");
+  assert.equal(workflow.jobs.reseal.if, "inputs.operation == 'reseal'");
+  assert.equal(workflow.jobs.deploy.if, "inputs.operation != 'reseal'");
+  assert.equal(workflow.jobs.quality.if, "inputs.operation != 'reseal'");
   assert.match(
     workflow.jobs.reseal.environment.name,
     /targets\[inputs\.target\]\.githubEnvironment/,
   );
-  assert.doesNotMatch(source, /environment:\s*(preview|preview-)/);
+  for (const output of ["app-id", "deployment-url"])
+    assert.equal(
+      workflow.on.workflow_call.outputs[output].value,
+      `\${{ jobs.deploy.outputs.${output} || jobs.reseal.outputs.${output} }}`,
+    );
 });
 
 test("Phala reseal shares the deploy's per-CVM queue and never cancels", () => {
-  const reseal = parse(
-    fs.readFileSync(`${directory}/phala-reseal.yml`, "utf8"),
-  );
-  const deploy = parse(
+  const workflow = parse(
     fs.readFileSync(`${directory}/phala-deploy.yml`, "utf8"),
   );
   assert.equal(
-    reseal.jobs.reseal.concurrency.group,
-    deploy.jobs.deploy.concurrency.group,
+    workflow.jobs.reseal.concurrency.group,
+    workflow.jobs.deploy.concurrency.group,
   );
-  assert.equal(reseal.jobs.reseal.concurrency["cancel-in-progress"], false);
+  assert.equal(workflow.jobs.reseal.concurrency["cancel-in-progress"], false);
 });
 
 test("Phala reseal builds nothing and runs only the pinned central tool", () => {
-  const source = fs.readFileSync(`${directory}/phala-reseal.yml`, "utf8");
-  const workflow = parse(source);
-  assert.doesNotMatch(source, /build-push-action|docker\/login-action|npx /);
-  assert.doesNotMatch(
-    workflow.jobs.reseal.permissions?.packages ?? "",
-    /write/,
+  const workflow = parse(
+    fs.readFileSync(`${directory}/phala-deploy.yml`, "utf8"),
   );
-  const tools = workflow.jobs.reseal.steps.find(
+  const job = workflow.jobs.reseal;
+  const source = JSON.stringify(job);
+  assert.doesNotMatch(source, /build-push-action|docker\/login-action|npx /);
+  assert.equal(job.permissions, undefined);
+  const tools = job.steps.find(
     (step) => step.with?.path === ".burnt-phala-tools",
   );
   assert.match(tools.with.ref, /^[0-9a-f]{40}$/);
   assert.equal(tools.with["persist-credentials"], false);
-  const run = workflow.jobs.reseal.steps.find((step) => step.id === "reseal");
+  const run = job.steps.find((step) => step.id === "reseal");
   assert.equal(run.run, "node .burnt-phala-tools/scripts/phala-reseal-cli.mjs");
   assert.match(run.env.ALL_SECRETS, /toJSON\(secrets\)/);
 });
 
 test("Phala reseal health checks fail closed", () => {
   const workflow = parse(
-    fs.readFileSync(`${directory}/phala-reseal.yml`, "utf8"),
+    fs.readFileSync(`${directory}/phala-deploy.yml`, "utf8"),
   );
   const health = workflow.jobs.reseal.steps.find(
     (step) => step.name === "Verify health",
