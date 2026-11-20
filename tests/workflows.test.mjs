@@ -1681,7 +1681,7 @@ test("Cloudflare bundles validate before build and never expose secrets to consu
   );
   assert.equal(
     publicStep.if,
-    "(fromJSON(inputs.deployment-policy).configurationSource == '1password' || fromJSON(inputs.deployment-policy).environmentSecret != '')",
+    "fromJSON(inputs.deployment-policy).environmentSecret != '' || (fromJSON(inputs.deployment-policy).configurationSource == '1password' && fromJSON(inputs.deployment-policy).workerVariables[0] != null)",
   );
   assert.match(secrets.if, /inputs.operation == 'deploy'/);
   assert.match(

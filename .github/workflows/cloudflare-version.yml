@@ -123,7 +123,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: burnt-labs/github-workflows
-          ref: e7a34f4bc6ee1bd7ee8971079125e7aed7f9875a # unreleased
+          ref: 2f796adabe5f6035126668257b20a1edcfc3264f # unreleased
           path: .burnt-workflows
           persist-credentials: false
       # A 1Password-sourced policy reads the target's item (one custom field per
@@ -145,8 +145,14 @@ jobs:
           VARIABLE_NAMES: ${{ toJSON(fromJSON(inputs.deployment-policy).workerVariables) }}
           OUTPUT_FILE: ${{ runner.temp }}/environment.json
         run: node .burnt-workflows/scripts/onepassword-cli.mjs
+      # A bundle always generates the target Wrangler config; a 1Password item
+      # does only when it supplies public vars, so a secrets-only item keeps the
+      # checked-in vars untouched.
       - name: Materialize public Worker variables
-        if: (fromJSON(inputs.deployment-policy).configurationSource == '1password' || fromJSON(inputs.deployment-policy).environmentSecret != '')
+        if: >-
+          fromJSON(inputs.deployment-policy).environmentSecret != '' ||
+          (fromJSON(inputs.deployment-policy).configurationSource == '1password' &&
+          fromJSON(inputs.deployment-policy).workerVariables[0] != null)
         working-directory: ${{ github.workspace }}
         env:
           DEPLOYMENT_POLICY: ${{ inputs.deployment-policy }}
