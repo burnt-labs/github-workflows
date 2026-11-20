@@ -86,7 +86,8 @@ These are not preferences. Changes that break them will be rejected.
 ## One flow per platform
 
 Every repository on a platform goes through that platform's one entry flow
-here. Do not undo this, and do not route around it:
+here. Do not undo this, and do not route around it. Phala consumers and their
+migration status are in `.agents/plans/phala-single-flow.md`:
 
 - **A new need is a new operation of the existing flow, never a new workflow
   file.** A second shared workflow for one task only moves a bespoke file into
