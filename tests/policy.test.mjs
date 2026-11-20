@@ -1139,3 +1139,38 @@ test("Cloudflare and Phala only accept explicit, non-overlapping public network 
     assert.throws(() => validate(legacy), /requires .*onePasswordTokenSecret/);
   }
 });
+
+test("Phala broker is an explicit configuration source and rejects mixed credentials", () => {
+  const policy = phalaPolicy();
+  policy.credentials.onePasswordBroker = true;
+  for (const target of Object.values(policy.targets))
+    target.configurationEnvironment = "6ijsqfxvdxlwjcpsx7yrzs3tka";
+  assert.equal(validatePhalaPolicy(policy).credentials.onePasswordBroker, true);
+  assert.throws(
+    () =>
+      validatePhalaPolicy({
+        ...policy,
+        credentials: {
+          ...policy.credentials,
+          onePasswordTokenSecret: "OP_ENVIRONMENT_TOKEN",
+        },
+      }),
+    /either 1Password Broker or a service account token/,
+  );
+  assert.throws(
+    () =>
+      validatePhalaPolicy({
+        ...policy,
+        runtimeSecrets: ["OP_INTEGRATION_KEY"],
+      }),
+    /reserved name/,
+  );
+  assert.throws(
+    () =>
+      validatePhalaPolicy({
+        ...policy,
+        credentials: { ...policy.credentials, onePasswordBroker: false },
+      }),
+    /onePasswordBroker must be true/,
+  );
+});

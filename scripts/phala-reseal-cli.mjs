@@ -29,7 +29,10 @@ try {
   // A 1Password-sourced policy: the declared runtime names come from the
   // target's item (loaded into a private file), not the GitHub Environment.
   const itemFile = process.env.RUNTIME_CONFIGURATION_FILE;
-  if (policy.credentials.onePasswordTokenSecret) {
+  if (
+    policy.credentials.onePasswordTokenSecret ||
+    policy.credentials.onePasswordBroker
+  ) {
     if (!itemFile || !fs.existsSync(itemFile))
       throw new Error("The 1Password runtime configuration was not loaded");
     const loaded = JSON.parse(fs.readFileSync(itemFile, "utf8"));

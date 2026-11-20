@@ -147,14 +147,16 @@ export async function loadEnvironment(run, id, reveal = true) {
 }
 
 /** Read and compose independent sources without letting either override the other. */
-export async function loadConfiguration(run, target, names) {
+export async function loadConfiguration(
+  run,
+  target,
+  names,
+  read = (id, reveal) => loadEnvironment(run, id, reveal),
+) {
   validateConfigurationSources(target, names, "The 1Password configuration");
   const { configurationEnvironment, networkConfiguration } = target;
   if (!networkConfiguration) {
-    return environmentValues(
-      await loadEnvironment(run, configurationEnvironment),
-      names,
-    );
+    return environmentValues(await read(configurationEnvironment), names);
   }
 
   const mappings = networkConfiguration.variables;
@@ -167,7 +169,7 @@ export async function loadConfiguration(run, target, names) {
     ...Object.values(mappings),
   ]);
   const appEntries = configurationEnvironment
-    ? await loadEnvironment(run, configurationEnvironment)
+    ? await read(configurationEnvironment)
     : [];
   for (const name of indexEntries(appEntries).keys()) {
     check(
@@ -179,7 +181,7 @@ export async function loadConfiguration(run, target, names) {
   // Fetch the shared Environment without revealing concealed fields, then copy
   // only the public keys this target declares.
   const networkEntries = indexEntries(
-    await loadEnvironment(run, networkConfiguration.environment, false),
+    await read(networkConfiguration.environment, false),
   );
   for (const [name, key] of Object.entries(mappings)) {
     const entry = networkEntries.get(key);

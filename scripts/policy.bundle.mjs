@@ -1806,6 +1806,15 @@ function validatePhalaPolicy(policy) {
     throw new Error("Phala credential secret names must differ");
   }
   const onePasswordToken = policy.credentials.onePasswordTokenSecret;
+  const broker = policy.credentials.onePasswordBroker;
+  if (broker !== void 0 && broker !== true)
+    throw new Error(
+      "Phala credentials.onePasswordBroker must be true when selected",
+    );
+  if (broker && onePasswordToken !== void 0)
+    throw new Error(
+      "Phala selects either 1Password Broker or a service account token",
+    );
   if (onePasswordToken !== void 0) {
     requireString(onePasswordToken, "Phala credentials.onePasswordTokenSecret");
     if (
@@ -1828,6 +1837,9 @@ function validatePhalaPolicy(policy) {
     policy.credentials.phalaApiKeySecret,
     policy.credentials.registryPasswordSecret,
     ...(onePasswordToken ? [onePasswordToken] : []),
+    ...(broker
+      ? ["OP_INTEGRATION_KEY", "OP_WORKLOAD_ID", "OP_NETWORK_WORKLOAD_ID"]
+      : []),
   ];
   const secretNames = validateEnvironmentNames(
     policy.runtimeSecrets,
@@ -1869,7 +1881,7 @@ function validatePhalaPolicy(policy) {
       throw new Error(
         `Phala targets.${role}.configurationItem was replaced by configurationEnvironment`,
       );
-    if (onePasswordToken) {
+    if (onePasswordToken || broker) {
       validateConfigurationSources(
         target,
         { secrets: policy.runtimeSecrets, variables: policy.runtimeVariables },

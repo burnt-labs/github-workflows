@@ -687,6 +687,15 @@ export function validatePhalaPolicy(policy) {
   // Runtime values come either from the target GitHub Environment (one secret or
   // variable per name) or from the 1Password sources declared for each target.
   const onePasswordToken = policy.credentials.onePasswordTokenSecret;
+  const broker = policy.credentials.onePasswordBroker;
+  if (broker !== undefined && broker !== true)
+    throw new Error(
+      "Phala credentials.onePasswordBroker must be true when selected",
+    );
+  if (broker && onePasswordToken !== undefined)
+    throw new Error(
+      "Phala selects either 1Password Broker or a service account token",
+    );
   if (onePasswordToken !== undefined) {
     requireString(onePasswordToken, "Phala credentials.onePasswordTokenSecret");
     if (
@@ -710,6 +719,9 @@ export function validatePhalaPolicy(policy) {
     policy.credentials.phalaApiKeySecret,
     policy.credentials.registryPasswordSecret,
     ...(onePasswordToken ? [onePasswordToken] : []),
+    ...(broker
+      ? ["OP_INTEGRATION_KEY", "OP_WORKLOAD_ID", "OP_NETWORK_WORKLOAD_ID"]
+      : []),
   ];
   const secretNames = validateEnvironmentNames(
     policy.runtimeSecrets,
@@ -752,7 +764,7 @@ export function validatePhalaPolicy(policy) {
       throw new Error(
         `Phala targets.${role}.configurationItem was replaced by configurationEnvironment`,
       );
-    if (onePasswordToken) {
+    if (onePasswordToken || broker) {
       validateConfigurationSources(
         target,
         { secrets: policy.runtimeSecrets, variables: policy.runtimeVariables },

@@ -237,3 +237,82 @@ test("fails closed on source conflicts, missing and concealed network entries", 
     /Unable to read the 1Password Environment/,
   );
 });
+
+test("Broker authenticates separately for app and network and preserves the SDK's masked flags", async () => {
+  const { readBrokerConfiguration } =
+    await import("../scripts/onepassword-broker/reader.mjs");
+  const workEnv = {
+    OP_INTEGRATION_KEY: "fixture-key==",
+    OP_WORKLOAD_ID: "app-workload",
+    OP_NETWORK_WORKLOAD_ID: "network-workload",
+    CONFIGURATION_ENVIRONMENT: id,
+    NETWORK_CONFIGURATION: JSON.stringify(target.networkConfiguration),
+    SECRET_NAMES: JSON.stringify(combinedNames.secrets),
+    VARIABLE_NAMES: JSON.stringify(combinedNames.variables),
+  };
+  const calls = [];
+  const createClient = async ({ workloadDetails, oidcFetcher }) => ({
+    environments: {
+      async getVariables(environmentId) {
+        calls.push([
+          workloadDetails,
+          environmentId,
+          await oidcFetcher("test-audience"),
+        ]);
+        const rows = environmentId === id ? app : network;
+        return {
+          variables: rows.map(({ name, value, concealed }) => ({
+            name,
+            value,
+            masked: concealed,
+          })),
+        };
+      },
+    },
+  });
+  const identity = async (audience, env) => {
+    assert.equal(audience, "test-audience");
+    assert.equal(env, workEnv);
+    return "synthetic-identity";
+  };
+  const values = await readBrokerConfiguration(workEnv, createClient, identity);
+  assert.deepEqual(
+    values,
+    await loadConfiguration(cli(), target, combinedNames),
+  );
+  assert.deepEqual(calls, [
+    [
+      { workloadUuid: "app-workload", customerManagedSecret: "fixture-key" },
+      id,
+      "synthetic-identity",
+    ],
+    [
+      {
+        workloadUuid: "network-workload",
+        customerManagedSecret: "fixture-key",
+      },
+      networkId,
+      "synthetic-identity",
+    ],
+  ]);
+  await assert.rejects(
+    readBrokerConfiguration(
+      { ...workEnv, OP_INTEGRATION_KEY: "" },
+      createClient,
+      identity,
+    ),
+    /OP_INTEGRATION_KEY is missing/,
+  );
+  await assert.rejects(
+    readBrokerConfiguration(
+      workEnv,
+      async () => {
+        throw new Error("internal hidden credential");
+      },
+      identity,
+    ),
+    (error) =>
+      /Broker could not read/.test(error.message) &&
+      !error.message.includes("hidden credential"),
+  );
+});

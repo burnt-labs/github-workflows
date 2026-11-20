@@ -1927,7 +1927,7 @@ test("Phala reseal builds nothing and runs only the pinned central tool", () => 
   const job = workflow.jobs.reseal;
   const source = JSON.stringify(job);
   assert.doesNotMatch(source, /build-push-action|docker\/login-action|npx /);
-  assert.equal(job.permissions, undefined);
+  assert.deepEqual(job.permissions, { contents: "read", "id-token": "write" });
   const tools = job.steps.find(
     (step) => step.with?.path === ".burnt-phala-tools",
   );
@@ -2165,4 +2165,26 @@ test("Cloudflare pull requests skip environment-bound jobs for 1Password consume
   assert.match(version.jobs.version.if, /configurationSource != '1password'/);
   assert.match(version.jobs.version.if, /pull_request","pull_request_target/);
   assert.equal(pr.jobs.quality.environment, undefined);
+});
+
+test("Phala requests workload identity only through the pinned deploy and reseal jobs", () => {
+  const workflow = parse(
+    fs.readFileSync(`${directory}/phala-deploy.yml`, "utf8"),
+  );
+  for (const name of ["deploy", "reseal"]) {
+    const job = workflow.jobs[name];
+    assert.equal(job.permissions["id-token"], "write");
+    assert.ok(job.environment);
+    const load = job.steps.find(
+      (step) =>
+        step.name === "Load runtime configuration from 1Password Broker",
+    );
+    assert.match(load.if, /credentials\.onePasswordBroker == true/);
+    assert.equal(
+      load.env.OP_INTEGRATION_KEY,
+      "${{ secrets.OP_INTEGRATION_KEY }}",
+    );
+    assert.equal(load.env.OP_WORKLOAD_ID, "${{ vars.OP_WORKLOAD_ID }}");
+    assert.ok(!Object.hasOwn(load.env, "OP_SERVICE_ACCOUNT_TOKEN"));
+  }
 });
