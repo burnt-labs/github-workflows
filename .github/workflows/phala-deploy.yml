@@ -81,7 +81,7 @@ jobs:
     needs: policy
     # A reseal builds nothing, so there is no consumer code to gate.
     if: inputs.operation != 'reseal'
-    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@b1a476b2f2f8906e17d2d5fa7309fd7d0fc6fd30 # unreleased
+    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@646e100c845927b2a0bc5ae07c0768c35815f89d # unreleased
 
   deploy:
     name: Phala ${{ inputs.target }}
