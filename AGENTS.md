@@ -621,6 +621,9 @@ string. The Environment is the source of truth for runtime values.
 // targets.<role>.configurationEnvironment; runtimeSecrets/runtimeVariables as before.
 ```
 
+Phala repositories declare only the roles they run. A request for an omitted
+role fails during policy validation, before deploy or reseal.
+
 The flows install a pinned 1Password CLI, read the Environment, and hand its values
 to the same materialization (Worker secrets file, generated Wrangler vars, Phala
 sealed env) the other sources use. The private file is always removed.

@@ -258,7 +258,10 @@ test("Phala requires policy before running consumer quality", () => {
   const workflow = parse(
     fs.readFileSync(`${directory}/phala-deploy.yml`, "utf8"),
   );
-  assert.match(workflow.jobs.policy.steps.at(-1).run, /--phala/);
+  const policy = workflow.jobs.policy.steps.find(
+    (step) => step.id === "policy",
+  );
+  assert.match(policy.run, /--phala/);
   assert.equal(workflow.jobs.quality.needs, "policy");
   assert.deepEqual(workflow.jobs.deploy.needs, ["policy", "quality"]);
 });
@@ -2066,6 +2069,22 @@ test("Cloudflare reads a 1Password Environment into the bundle path and always r
     index("Remove 1Password runtime configuration"),
     steps.length - 2,
   );
+});
+
+test("Phala rejects an unconfigured target before deploy or reseal", () => {
+  const workflow = parse(
+    fs.readFileSync(`${directory}/phala-deploy.yml`, "utf8"),
+  );
+  const guard = workflow.jobs.policy.steps.find(
+    (step) => step.name === "Require the selected target in policy",
+  );
+  assert.match(
+    guard.if,
+    /fromJSON\(steps\.policy\.outputs\.phala\)\.targets\[inputs\.target\] == null/,
+  );
+  assert.match(guard.run, /exit 1$/m);
+  assert.ok(workflow.jobs.deploy.needs.includes("policy"));
+  assert.ok(workflow.jobs.reseal.needs.includes("policy"));
 });
 
 test("Phala deploy and reseal read a 1Password Environment only when policy names its token", () => {

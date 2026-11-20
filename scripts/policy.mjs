@@ -727,9 +727,18 @@ export function validatePhalaPolicy(policy) {
     }
   }
 
-  for (const role of ["candidate", "release"]) {
-    const target = policy.targets?.[role];
-    if (!target || typeof target !== "object") {
+  const targets = policy.targets;
+  if (!targets || typeof targets !== "object" || Array.isArray(targets))
+    throw new Error("Phala targets must declare candidate, release, or both");
+  const roles = Object.keys(targets);
+  if (
+    roles.length === 0 ||
+    roles.some((role) => role !== "candidate" && role !== "release")
+  )
+    throw new Error("Phala targets must declare candidate, release, or both");
+  for (const role of roles) {
+    const target = targets[role];
+    if (!target || typeof target !== "object" || Array.isArray(target)) {
       throw new Error(`Phala targets.${role} must be an object`);
     }
     requireString(

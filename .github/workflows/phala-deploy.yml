@@ -77,6 +77,12 @@ jobs:
         name: Require and validate Phala policy
         run: node .burnt-workflows/scripts/policy.bundle.mjs --phala
 
+      - name: Require the selected target in policy
+        if: fromJSON(steps.policy.outputs.phala).targets[inputs.target] == null
+        run: |
+          echo "::error::The selected Phala target is not configured"
+          exit 1
+
   quality:
     needs: policy
     # A reseal builds nothing, so there is no consumer code to gate.

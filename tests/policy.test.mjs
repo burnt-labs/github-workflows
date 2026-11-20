@@ -552,6 +552,19 @@ test("Phala runtime values can come from one 1Password Environment per target", 
     return policy;
   };
   assert.deepEqual(validatePhalaPolicy(onePassword()), onePassword());
+  for (const role of ["candidate", "release"]) {
+    const policy = onePassword();
+    delete policy.targets[role];
+    assert.deepEqual(validatePhalaPolicy(policy), policy);
+  }
+  for (const targets of [{}, { staging: {} }]) {
+    const policy = onePassword();
+    policy.targets = targets;
+    assert.throws(
+      () => validatePhalaPolicy(policy),
+      /targets must declare candidate, release, or both/,
+    );
+  }
   for (const [mutate, pattern] of [
     [
       (policy) => delete policy.targets.candidate.configurationEnvironment,
