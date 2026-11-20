@@ -1546,6 +1546,14 @@ function validateDeploymentPolicy(policy) {
         `verificationSecrets requires targets.${role}.commands.afterDeploy`,
       );
     }
+    if (
+      policy.configurationSource === "1password" &&
+      policy.workerVariables.length &&
+      target.wranglerConfig === void 0
+    )
+      throw new Error(
+        `1Password workerVariables require targets.${role}.wranglerConfig`,
+      );
     if (policy.environmentSecret && target.wranglerConfig === void 0) {
       throw new Error(
         `environmentSecret requires targets.${role}.wranglerConfig`,

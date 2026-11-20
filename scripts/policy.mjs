@@ -436,6 +436,15 @@ export function validateDeploymentPolicy(policy) {
         `verificationSecrets requires targets.${role}.commands.afterDeploy`,
       );
     }
+    // Public vars generate a target Wrangler config; secrets alone do not.
+    if (
+      policy.configurationSource === "1password" &&
+      policy.workerVariables.length &&
+      target.wranglerConfig === undefined
+    )
+      throw new Error(
+        `1Password workerVariables require targets.${role}.wranglerConfig`,
+      );
     if (policy.environmentSecret && target.wranglerConfig === undefined) {
       throw new Error(
         `environmentSecret requires targets.${role}.wranglerConfig`,

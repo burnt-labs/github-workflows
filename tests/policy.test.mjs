@@ -889,6 +889,10 @@ test("runtime configuration can come from one 1Password item per target", () => 
       "op://Deploy Config/service production";
     policy.targets.release.commands = { afterDeploy: "node verify.mjs" };
     policy.targets.candidate.commands = { afterDeploy: "node verify.mjs" };
+    policy.targets.candidate.wranglerConfig =
+      ".wrangler.staging.generated.jsonc";
+    policy.targets.release.wranglerConfig =
+      ".wrangler.production.generated.jsonc";
     return policy;
   };
   const validated = validateDeploymentPolicy(onePassword());
@@ -908,6 +912,10 @@ test("runtime configuration can come from one 1Password item per target", () => 
   );
 
   for (const [mutate, pattern] of [
+    [
+      (policy) => delete policy.targets.release.wranglerConfig,
+      /1Password workerVariables require targets\.release\.wranglerConfig/,
+    ],
     [
       (policy) => delete policy.targets.release.configurationItem,
       /targets\.release\.configurationItem must be an op:\/\/<vault>\/<item>/,
@@ -939,6 +947,16 @@ test("runtime configuration can come from one 1Password item per target", () => 
     mutate(policy);
     assert.throws(() => validateDeploymentPolicy(policy), pattern);
   }
+
+  // Secrets alone need no generated Wrangler config.
+  const secretsOnly = onePassword();
+  secretsOnly.workerVariables = [];
+  delete secretsOnly.targets.candidate.wranglerConfig;
+  delete secretsOnly.targets.release.wranglerConfig;
+  assert.equal(
+    validateDeploymentPolicy(secretsOnly).configurationSource,
+    "1password",
+  );
 
   const stray = deploymentPolicy();
   stray.targets.candidate.configurationItem = "op://deploy/service";
