@@ -71,7 +71,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: burnt-labs/github-workflows
-          ref: a9af890a1692ee7406861019ffc4a60f1830a992 # unreleased
+          ref: ce0f2df3252ba169e71e794855e7bf1facf2ffe7 # unreleased
           path: .burnt-workflows
       - id: policy
         name: Require and validate Phala policy
@@ -168,7 +168,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: burnt-labs/github-workflows
-          ref: a9af890a1692ee7406861019ffc4a60f1830a992 # unreleased
+          ref: ce0f2df3252ba169e71e794855e7bf1facf2ffe7 # unreleased
           path: .burnt-config-tools
           persist-credentials: false
       - name: Move configuration tooling outside the image build context
@@ -279,7 +279,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: burnt-labs/github-workflows
-          ref: a9af890a1692ee7406861019ffc4a60f1830a992 # unreleased
+          ref: ce0f2df3252ba169e71e794855e7bf1facf2ffe7 # unreleased
           path: .burnt-registry-tools
           persist-credentials: false
       # The CVM pulls a prebuilt image with the sealed registry login, so prove
@@ -557,7 +557,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: burnt-labs/github-workflows
-          ref: a9af890a1692ee7406861019ffc4a60f1830a992 # unreleased
+          ref: ce0f2df3252ba169e71e794855e7bf1facf2ffe7 # unreleased
           path: .burnt-phala-tools
           persist-credentials: false
       - name: Install 1Password CLI
