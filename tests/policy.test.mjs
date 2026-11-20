@@ -481,6 +481,56 @@ test("Phala requires concrete deployment and image fields", () => {
   }
 });
 
+test("Phala deploys a prebuilt image by its full repository", () => {
+  const prebuilt = () => {
+    const policy = phalaPolicy();
+    delete policy.image.context;
+    delete policy.image.dockerfile;
+    delete policy.image.name;
+    policy.image.repository = "ghcr.io/burnt-labs/oauth3";
+    return policy;
+  };
+  assert.deepEqual(validatePhalaPolicy(prebuilt()), prebuilt());
+  const nested = prebuilt();
+  nested.image.repository = "ghcr.io/burnt-labs/dossier-tdx-enclave";
+  assert.deepEqual(validatePhalaPolicy(structuredClone(nested)), nested);
+  for (const [mutate, pattern] of [
+    [(policy) => (policy.image.repository = ""), /image\.repository/],
+    [
+      (policy) => (policy.image.repository = "docker.io/org/app"),
+      /ghcr\.io\/<owner>\/<image>/,
+    ],
+    [
+      (policy) => (policy.image.repository = "ghcr.io/oauth3"),
+      /ghcr\.io\/<owner>\/<image>/,
+    ],
+    [
+      (policy) => (policy.image.repository = "ghcr.io/Burnt/app"),
+      /ghcr\.io\/<owner>\/<image>/,
+    ],
+    [
+      (policy) => (policy.image.repository = "ghcr.io/org/app@sha256:00"),
+      /ghcr\.io\/<owner>\/<image>/,
+    ],
+    [
+      (policy) => (policy.image.dockerfile = "Dockerfile"),
+      /image\.dockerfile does not apply to a prebuilt/,
+    ],
+    [
+      (policy) => (policy.image.name = "oauth3"),
+      /image\.name does not apply to a prebuilt/,
+    ],
+    [(policy) => delete policy.image.composeVariable, /image\.composeVariable/],
+  ]) {
+    const policy = prebuilt();
+    mutate(policy);
+    assert.throws(() => validatePhalaPolicy(policy), pattern);
+  }
+  const built = phalaPolicy();
+  delete built.image.dockerfile;
+  assert.throws(() => validatePhalaPolicy(built), /image\.dockerfile/);
+});
+
 test("Phala targets may name the public URL they serve", () => {
   const policy = phalaPolicy();
   policy.targets.release.publicUrl = "https://service.example.com";

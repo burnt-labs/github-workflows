@@ -1949,3 +1949,57 @@ test("Phala reseal health checks fail closed", () => {
   assert.match(health.run, /curl --fail/);
   assert.match(health.run, /exit 1$/m);
 });
+
+test("Phala deploys a prebuilt image only by an explicit, pullable digest", () => {
+  const workflow = parse(
+    fs.readFileSync(`${directory}/phala-deploy.yml`, "utf8"),
+  );
+  assert.equal(workflow.on.workflow_call.inputs["image-digest"].default, "");
+  const steps = workflow.jobs.deploy.steps;
+  const resolve = steps.find((step) => step.id === "image");
+  assert.match(resolve.env.IMAGE_REPOSITORY, /image\.repository/);
+  assert.match(resolve.run, /\^sha256:\[0-9a-f\]\{64\}\$/);
+  assert.match(
+    resolve.run,
+    /image-digest applies only to a policy whose image\.repository/,
+  );
+  for (const name of [
+    "Setup Docker Buildx",
+    "Login to GHCR for push",
+    "Build and push image",
+  ])
+    assert.equal(
+      steps.find((step) => step.name === name).if,
+      "steps.image.outputs.prebuilt != 'true'",
+      name,
+    );
+  const verify = steps.find(
+    (step) => step.name === "Verify the prebuilt image",
+  );
+  assert.equal(verify.if, "steps.image.outputs.prebuilt == 'true'");
+  assert.match(verify.run, /proveRegistryAccess/);
+  assert.match(verify.env.REGISTRY_PASSWORD_NAME, /registryPasswordSecret/);
+  const verifyIndex = steps.indexOf(verify);
+  for (const name of [
+    "Render the compose file",
+    "Deploy CVM",
+    "Apply explicit Phala operation",
+  ])
+    assert.ok(
+      steps.findIndex((step) => step.name === name) > verifyIndex,
+      name,
+    );
+  const consumers = steps.filter((step) =>
+    step.env?.IMAGE_DIGEST?.includes("steps.build"),
+  );
+  assert.deepEqual(
+    consumers.map((step) => step.name),
+    ["Render the compose file", "Apply explicit Phala operation"],
+  );
+  for (const step of consumers)
+    assert.equal(
+      step.env.IMAGE_DIGEST,
+      "${{ steps.build.outputs.digest || steps.image.outputs.digest }}",
+      step.name,
+    );
+});

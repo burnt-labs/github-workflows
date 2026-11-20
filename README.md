@@ -543,6 +543,14 @@ and update-only runs queue instead of canceling active work. Legacy `deploy`
 calls retain their cancellation behavior, so pause automatic deployments while
 performing first-time setup. No consumer pins are advanced automatically.
 
+An image built elsewhere (a Nix or release pipeline of its own) is deployed
+instead of built: policy names `image.repository` (`ghcr.io/<owner>/<image>`)
+and drops `context`, `dockerfile` and `name`, and the caller passes the
+`image-digest` input (`sha256:<64 hex>`). The flow then builds nothing, proves
+the registry login pulls that exact digest, and renders it into the compose
+exactly as it renders a built one. A digest without `image.repository`, or the
+reverse, fails before anything is deployed.
+
 `image.composeVariable` is substituted into the compose file before the deploy,
 by digest, so the compose hash dstack measures names the exact image running. It
 is not delivered to the CVM as an environment variable. The compose hash
