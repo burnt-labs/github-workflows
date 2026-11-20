@@ -189,7 +189,6 @@ Each protected GitHub Environment defines `OP_WORKLOAD_ID` for its app binding
 and `OP_NETWORK_WORKLOAD_ID` if it reads a shared network Environment. The IDs
 are GitHub variables. The deployment step exchanges its short-lived GitHub
 identity with 1Password and validates concealment before materializing values.
-Brokered Phala operations require the caller's default branch.
 
 Phala repositories declare only the roles they run. A request for an omitted
 role fails during policy validation, before deploy or reseal.
