@@ -26,6 +26,19 @@ try {
   const target = policy.targets[role];
   const secrets = JSON.parse(process.env.ALL_SECRETS);
   const variables = JSON.parse(process.env.ALL_VARIABLES);
+  // A 1Password-sourced policy: the declared runtime names come from the
+  // target's item (loaded into a private file), not the GitHub Environment.
+  const itemFile = process.env.RUNTIME_CONFIGURATION_FILE;
+  if (policy.credentials.onePasswordTokenSecret) {
+    if (!itemFile || !fs.existsSync(itemFile))
+      throw new Error("The 1Password runtime configuration was not loaded");
+    const loaded = JSON.parse(fs.readFileSync(itemFile, "utf8"));
+    fs.rmSync(itemFile, { force: true });
+    for (const name of policy.runtimeSecrets)
+      secrets[name] = loaded.secrets[name];
+    for (const name of policy.runtimeVariables)
+      variables[name] = loaded.vars[name];
+  }
   const apiKey = secrets[policy.credentials.phalaApiKeySecret];
   if (!apiKey)
     throw new Error(
