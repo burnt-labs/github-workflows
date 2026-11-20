@@ -560,6 +560,48 @@ orchestration. A caller that needs to store the URL or redeploy another service
 does so in its own downstream job; the reusable workflow never mutates those
 resources itself.
 
+### Resealing an existing CVM
+
+`phala-reseal.yml` re-applies a CVM's sealed environment from the same policy and
+restarts it, with no image build and no compose change, so the attested identity
+stays. Use it when a sealed value changed outside a deploy. The usual case is a
+rotated registry password: Phala logs in to the registry only at boot, so the
+next reboot stops at `pre-launch` with `docker login failed` until the CVM is
+resealed.
+
+```yaml
+name: Phala Reseal
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        required: true
+        type: choice
+        options: [candidate, release]
+
+permissions:
+  contents: read
+
+jobs:
+  reseal:
+    uses: burnt-labs/github-workflows/.github/workflows/phala-reseal.yml@<sha> # vX.Y.Z
+    with:
+      target: ${{ inputs.target }}
+    secrets: inherit
+```
+
+Phala replaces the whole sealed environment and cannot read it back, so the
+reseal writes exactly the names the CVM's compose allows (`allowed_envs`), each
+from policy: `runtimeSecrets`, `runtimeVariables`, and `DSTACK_DOCKER_*` from
+`image.registry`, `image.registryUsername` and `credentials.registryPasswordSecret`.
+It fails closed when the CVM allows a name policy does not declare, when only
+part of the registry login is sealed, or when a value is unset. Before sealing a
+registry login it proves the login pulls every digest-pinned image the CVM uses
+from that registry. It runs only by manual dispatch from the default branch,
+finds the one CVM named by the target, queues behind deploys in the same per-CVM
+concurrency group, then restarts and health-checks it.
+
 ## Frontend builds
 
 Cloudflare consumers can declare target-specific public build inputs and

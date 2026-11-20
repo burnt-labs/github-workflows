@@ -1874,3 +1874,68 @@ test("measured public configuration is substituted without rejecting environment
   assert(result.includes('METRICS_URL: "https://metrics.example"'));
   assert(!result.includes("${METRICS_URL"));
 });
+
+test("Phala reseal is manual, policy-gated and runs in the caller's real environment", () => {
+  const source = fs.readFileSync(`${directory}/phala-reseal.yml`, "utf8");
+  const workflow = parse(source);
+  assert.deepEqual(Object.keys(workflow.on), ["workflow_call"]);
+  assert.match(source, /target must be candidate or release/);
+  assert.match(
+    source,
+    /reseal requires a manual run from the caller's default branch/,
+  );
+  assert.match(workflow.jobs.policy.steps.at(-1).run, /--phala/);
+  assert.equal(workflow.jobs.reseal.needs, "policy");
+  assert.match(
+    workflow.jobs.reseal.environment.name,
+    /targets\[inputs\.target\]\.githubEnvironment/,
+  );
+  assert.doesNotMatch(source, /environment:\s*(preview|preview-)/);
+});
+
+test("Phala reseal shares the deploy's per-CVM queue and never cancels", () => {
+  const reseal = parse(
+    fs.readFileSync(`${directory}/phala-reseal.yml`, "utf8"),
+  );
+  const deploy = parse(
+    fs.readFileSync(`${directory}/phala-deploy.yml`, "utf8"),
+  );
+  assert.equal(
+    reseal.jobs.reseal.concurrency.group,
+    deploy.jobs.deploy.concurrency.group,
+  );
+  assert.equal(reseal.jobs.reseal.concurrency["cancel-in-progress"], false);
+});
+
+test("Phala reseal builds nothing and runs only the pinned central tool", () => {
+  const source = fs.readFileSync(`${directory}/phala-reseal.yml`, "utf8");
+  const workflow = parse(source);
+  assert.doesNotMatch(source, /build-push-action|docker\/login-action|npx /);
+  assert.doesNotMatch(
+    workflow.jobs.reseal.permissions?.packages ?? "",
+    /write/,
+  );
+  const tools = workflow.jobs.reseal.steps.find(
+    (step) => step.with?.path === ".burnt-phala-tools",
+  );
+  assert.match(tools.with.ref, /^[0-9a-f]{40}$/);
+  assert.equal(tools.with["persist-credentials"], false);
+  const run = workflow.jobs.reseal.steps.find((step) => step.id === "reseal");
+  assert.equal(run.run, "node .burnt-phala-tools/scripts/phala-reseal-cli.mjs");
+  assert.match(run.env.ALL_SECRETS, /toJSON\(secrets\)/);
+});
+
+test("Phala reseal health checks fail closed", () => {
+  const workflow = parse(
+    fs.readFileSync(`${directory}/phala-reseal.yml`, "utf8"),
+  );
+  const health = workflow.jobs.reseal.steps.find(
+    (step) => step.name === "Verify health",
+  );
+  assert.match(
+    health.env.DEPLOYMENT_URL,
+    /steps\.reseal\.outputs\.deployment-url/,
+  );
+  assert.match(health.run, /curl --fail/);
+  assert.match(health.run, /exit 1$/m);
+});
