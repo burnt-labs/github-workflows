@@ -186,6 +186,7 @@ jobs:
         env:
           OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets[fromJSON(needs.policy.outputs.phala).credentials.onePasswordTokenSecret] }}
           CONFIGURATION_ENVIRONMENT: ${{ fromJSON(needs.policy.outputs.phala).targets[inputs.target].configurationEnvironment }}
+          NETWORK_CONFIGURATION: ${{ toJSON(fromJSON(needs.policy.outputs.phala).targets[inputs.target].networkConfiguration) }}
           SECRET_NAMES: ${{ toJSON(fromJSON(needs.policy.outputs.phala).runtimeSecrets) }}
           VARIABLE_NAMES: ${{ toJSON(fromJSON(needs.policy.outputs.phala).runtimeVariables) }}
           OUTPUT_FILE: ${{ runner.temp }}/phala-runtime.json
@@ -570,6 +571,7 @@ jobs:
         env:
           OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets[fromJSON(needs.policy.outputs.phala).credentials.onePasswordTokenSecret] }}
           CONFIGURATION_ENVIRONMENT: ${{ fromJSON(needs.policy.outputs.phala).targets[inputs.target].configurationEnvironment }}
+          NETWORK_CONFIGURATION: ${{ toJSON(fromJSON(needs.policy.outputs.phala).targets[inputs.target].networkConfiguration) }}
           SECRET_NAMES: ${{ toJSON(fromJSON(needs.policy.outputs.phala).runtimeSecrets) }}
           VARIABLE_NAMES: ${{ toJSON(fromJSON(needs.policy.outputs.phala).runtimeVariables) }}
           OUTPUT_FILE: ${{ runner.temp }}/phala-runtime.json

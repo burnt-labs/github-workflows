@@ -2031,6 +2031,10 @@ test("Cloudflare reads a 1Password Environment into the bundle path and always r
     load.env.CONFIGURATION_ENVIRONMENT,
     /targets\[inputs\.target\]\.configurationEnvironment/,
   );
+  assert.match(
+    load.env.NETWORK_CONFIGURATION,
+    /targets\[inputs\.target\]\.networkConfiguration/,
+  );
   assert.match(load.env.SECRET_NAMES, /workerSecrets/);
   assert.match(load.env.VARIABLE_NAMES, /workerVariables/);
   assert.equal(load.env.OUTPUT_FILE, "${{ runner.temp }}/environment.json");
@@ -2107,6 +2111,10 @@ test("Phala deploy and reseal read a 1Password Environment only when policy name
       load.env.CONFIGURATION_ENVIRONMENT,
       /targets\[inputs\.target\]\.configurationEnvironment/,
     );
+    assert.match(
+      load.env.NETWORK_CONFIGURATION,
+      /targets\[inputs\.target\]\.networkConfiguration/,
+    );
     assert.match(load.env.SECRET_NAMES, /runtimeSecrets/);
     assert.match(load.env.VARIABLE_NAMES, /runtimeVariables/);
     assert.equal(load.env.OUTPUT_FILE, "${{ runner.temp }}/phala-runtime.json");
@@ -2143,4 +2151,18 @@ test("Phala deploy and reseal read a 1Password Environment only when policy name
       .RUNTIME_CONFIGURATION_FILE,
     "${{ runner.temp }}/phala-runtime.json",
   );
+});
+
+test("Cloudflare pull requests skip environment-bound jobs for 1Password consumers", () => {
+  const pr = parse(fs.readFileSync(`${directory}/cloudflare-pr.yml`, "utf8"));
+  const version = parse(
+    fs.readFileSync(`${directory}/cloudflare-version.yml`, "utf8"),
+  );
+  assert.match(
+    pr.jobs["preview-candidate"].if,
+    /configurationSource != '1password'/,
+  );
+  assert.match(version.jobs.version.if, /configurationSource != '1password'/);
+  assert.match(version.jobs.version.if, /pull_request","pull_request_target/);
+  assert.equal(pr.jobs.quality.environment, undefined);
 });

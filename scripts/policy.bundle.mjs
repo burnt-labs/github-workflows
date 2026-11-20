@@ -1159,6 +1159,7 @@ function validateTargetConfiguration(target, names) {
 
 // scripts/onepassword.mjs
 var environmentIdPattern = /^[a-z2-7]{26}$/;
+var namePattern = /^[A-Z][A-Z0-9_]*$/;
 function check2(condition, message) {
   if (!condition) throw new Error(message);
 }
@@ -1168,6 +1169,60 @@ function validateEnvironmentId(id, label) {
     `${label} must be a 26-character 1Password Environment ID`,
   );
   return id;
+}
+function validateConfigurationSources(target, names, label) {
+  const { configurationEnvironment, networkConfiguration } = target;
+  if (networkConfiguration === void 0) {
+    validateEnvironmentId(
+      configurationEnvironment,
+      `${label}.configurationEnvironment`,
+    );
+    return;
+  }
+  const networkLabel = `${label}.networkConfiguration`;
+  check2(
+    networkConfiguration !== null &&
+      typeof networkConfiguration === "object" &&
+      !Array.isArray(networkConfiguration),
+    `${networkLabel} must be an object`,
+  );
+  const { environment, variables } = networkConfiguration;
+  validateEnvironmentId(environment, `${networkLabel}.environment`);
+  check2(
+    variables &&
+      typeof variables === "object" &&
+      !Array.isArray(variables) &&
+      Object.keys(variables).length > 0,
+    `${networkLabel}.variables must be a non-empty map of runtime names to network keys`,
+  );
+  const appNames = [
+    ...names.secrets,
+    ...names.variables.filter((name) => !Object.hasOwn(variables, name)),
+  ];
+  for (const [name, key] of Object.entries(variables)) {
+    check2(
+      names.variables.includes(name),
+      `${networkLabel}.variables must map a declared public runtime name: ${name}`,
+    );
+    check2(
+      typeof key === "string" && namePattern.test(key),
+      `${networkLabel}.variables must use uppercase network keys`,
+    );
+    check2(
+      !appNames.includes(key),
+      `App runtime name ${key} shadows a network key`,
+    );
+  }
+  if (configurationEnvironment !== void 0 || appNames.length > 0) {
+    validateEnvironmentId(
+      configurationEnvironment,
+      `${label}.configurationEnvironment`,
+    );
+    check2(
+      configurationEnvironment !== environment,
+      `${label} app and network Environments must differ`,
+    );
+  }
 }
 
 // scripts/policy.mjs
@@ -1500,16 +1555,18 @@ function validateDeploymentPolicy(policy) {
         `deployment targets.${role}.configurationItem was replaced by configurationEnvironment`,
       );
     if (policy.configurationSource === "1password")
-      validateEnvironmentId(
-        target.configurationEnvironment,
-        `deployment targets.${role}.configurationEnvironment`,
+      validateConfigurationSources(
+        target,
+        { secrets: policy.workerSecrets, variables: policy.workerVariables },
+        `deployment targets.${role}`,
       );
     else if (
-      target.configurationEnvironment !== void 0 &&
-      target.configurationEnvironment !== ""
+      (target.configurationEnvironment !== void 0 &&
+        target.configurationEnvironment !== "") ||
+      target.networkConfiguration !== void 0
     )
       throw new Error(
-        `deployment targets.${role}.configurationEnvironment requires onePasswordTokenSecret`,
+        `deployment targets.${role}.configurationEnvironment requires onePasswordTokenSecret, as does networkConfiguration`,
       );
     else target.configurationEnvironment = "";
     if (single) {
@@ -1813,17 +1870,21 @@ function validatePhalaPolicy(policy) {
         `Phala targets.${role}.configurationItem was replaced by configurationEnvironment`,
       );
     if (onePasswordToken) {
-      validateEnvironmentId(
-        target.configurationEnvironment,
-        `Phala targets.${role}.configurationEnvironment`,
+      validateConfigurationSources(
+        target,
+        { secrets: policy.runtimeSecrets, variables: policy.runtimeVariables },
+        `Phala targets.${role}`,
       );
       if (target.configuration !== void 0)
         throw new Error(
           `Phala targets.${role} takes its values from configurationEnvironment, not a configuration bundle`,
         );
-    } else if (target.configurationEnvironment !== void 0)
+    } else if (
+      target.configurationEnvironment !== void 0 ||
+      target.networkConfiguration !== void 0
+    )
       throw new Error(
-        `Phala targets.${role}.configurationEnvironment requires credentials.onePasswordTokenSecret`,
+        `Phala targets.${role}.configurationEnvironment requires credentials.onePasswordTokenSecret, as does networkConfiguration`,
       );
     if (target.setup !== void 0) validateInfrastructure(target.setup);
     validateTargetConfiguration(target, policy.runtimeVariables);

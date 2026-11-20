@@ -142,8 +142,9 @@ string. The Environment is the source of truth for runtime values.
   concealment flag, fails the run before anything builds. Errors name entries,
   never values. Validated secrets are masked before subsequent steps run.
 - **Policy:** name the GitHub secret holding a 1Password **service account**
-  token with read access to that repository's Environments, and give each
-  target its 26-character Environment ID:
+  token in each target's GitHub Environment. Grant the token read access to
+  the 1Password Environments that target uses. Give each target its app
+  Environment ID, if it has app-specific values:
 
 ```jsonc
 // deployment-policy.jsonc
@@ -159,6 +160,26 @@ string. The Environment is the source of truth for runtime values.
 // phala-policy.jsonc: credentials.onePasswordTokenSecret, plus
 // targets.<role>.configurationEnvironment; runtimeSecrets/runtimeVariables as before.
 ```
+
+Use `targets.<role>.networkConfiguration` to select public values from a
+separate network Environment. Each key in `variables` is a declared
+`workerVariables` or `runtimeVariables` name. Its value is the corresponding
+1Password key:
+
+```jsonc
+"networkConfiguration": {
+  "environment": "6ijsqfxvdxlwjcpsx7yrzs3tka",
+  "variables": { "CODE_ID": "XION_ABSTRACT_ACCOUNT_CODE_ID" },
+}
+```
+
+The two Environments must be distinct. App entries that duplicate a network
+key or a mapped runtime name fail validation. A network-only target can omit
+`configurationEnvironment` when all its runtime values are mapped public
+variables. For Cloudflare, a network mapping preserves unrelated Wrangler
+vars and rejects any managed variable also defined in the selected source
+Wrangler config. Cloudflare pull requests run quality without uploading a
+Worker preview when the policy uses 1Password.
 
 Phala repositories declare only the roles they run. A request for an omitted
 role fails during policy validation, before deploy or reseal.

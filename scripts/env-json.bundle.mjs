@@ -1108,6 +1108,7 @@ function validateBuildInputs({ buildVariables, buildAssets } = {}) {
 
 // scripts/onepassword.mjs
 var environmentIdPattern = /^[a-z2-7]{26}$/;
+var namePattern = /^[A-Z][A-Z0-9_]*$/;
 function check(condition, message) {
   if (!condition) throw new Error(message);
 }
@@ -1117,6 +1118,60 @@ function validateEnvironmentId(id, label) {
     `${label} must be a 26-character 1Password Environment ID`,
   );
   return id;
+}
+function validateConfigurationSources(target, names, label) {
+  const { configurationEnvironment, networkConfiguration } = target;
+  if (networkConfiguration === void 0) {
+    validateEnvironmentId(
+      configurationEnvironment,
+      `${label}.configurationEnvironment`,
+    );
+    return;
+  }
+  const networkLabel = `${label}.networkConfiguration`;
+  check(
+    networkConfiguration !== null &&
+      typeof networkConfiguration === "object" &&
+      !Array.isArray(networkConfiguration),
+    `${networkLabel} must be an object`,
+  );
+  const { environment, variables } = networkConfiguration;
+  validateEnvironmentId(environment, `${networkLabel}.environment`);
+  check(
+    variables &&
+      typeof variables === "object" &&
+      !Array.isArray(variables) &&
+      Object.keys(variables).length > 0,
+    `${networkLabel}.variables must be a non-empty map of runtime names to network keys`,
+  );
+  const appNames = [
+    ...names.secrets,
+    ...names.variables.filter((name) => !Object.hasOwn(variables, name)),
+  ];
+  for (const [name, key] of Object.entries(variables)) {
+    check(
+      names.variables.includes(name),
+      `${networkLabel}.variables must map a declared public runtime name: ${name}`,
+    );
+    check(
+      typeof key === "string" && namePattern.test(key),
+      `${networkLabel}.variables must use uppercase network keys`,
+    );
+    check(
+      !appNames.includes(key),
+      `App runtime name ${key} shadows a network key`,
+    );
+  }
+  if (configurationEnvironment !== void 0 || appNames.length > 0) {
+    validateEnvironmentId(
+      configurationEnvironment,
+      `${label}.configurationEnvironment`,
+    );
+    check(
+      configurationEnvironment !== environment,
+      `${label} app and network Environments must differ`,
+    );
+  }
 }
 
 // scripts/policy.mjs
@@ -1377,16 +1432,18 @@ function validateDeploymentPolicy(policy) {
         `deployment targets.${role}.configurationItem was replaced by configurationEnvironment`,
       );
     if (policy.configurationSource === "1password")
-      validateEnvironmentId(
-        target.configurationEnvironment,
-        `deployment targets.${role}.configurationEnvironment`,
+      validateConfigurationSources(
+        target,
+        { secrets: policy.workerSecrets, variables: policy.workerVariables },
+        `deployment targets.${role}`,
       );
     else if (
-      target.configurationEnvironment !== void 0 &&
-      target.configurationEnvironment !== ""
+      (target.configurationEnvironment !== void 0 &&
+        target.configurationEnvironment !== "") ||
+      target.networkConfiguration !== void 0
     )
       throw new Error(
-        `deployment targets.${role}.configurationEnvironment requires onePasswordTokenSecret`,
+        `deployment targets.${role}.configurationEnvironment requires onePasswordTokenSecret, as does networkConfiguration`,
       );
     else target.configurationEnvironment = "";
     if (single) {
@@ -1606,7 +1663,20 @@ function materializePublicConfiguration(options) {
     throw new Error(
       "Source Wrangler configuration does not contain the selected environment",
     );
-  scope.vars = values.vars;
+  if (selected.networkConfiguration) {
+    const existing = scope.vars ?? {};
+    if (!object2(existing))
+      throw new Error("Source Wrangler vars must be an object");
+    for (const name of Object.keys(values.vars)) {
+      if (Object.hasOwn(existing, name))
+        throw new Error(
+          `Source Wrangler vars already define 1Password key ${name}`,
+        );
+    }
+    scope.vars = { ...existing, ...values.vars };
+  } else {
+    scope.vars = values.vars;
+  }
   fs.writeFileSync(
     files.generated,
     `${JSON.stringify(config, null, 2)}

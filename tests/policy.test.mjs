@@ -1051,3 +1051,91 @@ test("Phala setup infrastructure is optional for existing callers but explicit w
     assert.throws(() => validatePhalaPolicy(invalid), /setup infrastructure/);
   }
 });
+
+test("Cloudflare and Phala only accept explicit, non-overlapping public network mappings", () => {
+  const appId = "6ijsqfxvdxlwjcpsx7yrzs3tka";
+  const networkId = "czahekt2sougvaklfeqwocb5si";
+  for (const [makePolicy, validate, declare] of [
+    [
+      deploymentPolicy,
+      validateDeploymentPolicy,
+      (policy) => {
+        policy.onePasswordTokenSecret = "OP_ENVIRONMENT_TOKEN";
+        policy.workerVariables = ["CHAIN", "LOCAL_MODE"];
+        policy.workerSecrets = ["API_TOKEN"];
+        for (const target of Object.values(policy.targets)) {
+          target.configurationEnvironment = appId;
+          target.wranglerConfig = ".wrangler.generated.jsonc";
+        }
+      },
+    ],
+    [
+      phalaPolicy,
+      validatePhalaPolicy,
+      (policy) => {
+        policy.credentials.onePasswordTokenSecret = "OP_ENVIRONMENT_TOKEN";
+        policy.runtimeVariables = ["CHAIN", "LOCAL_MODE"];
+        policy.runtimeSecrets = ["API_TOKEN"];
+        for (const target of Object.values(policy.targets))
+          target.configurationEnvironment = appId;
+      },
+    ],
+  ]) {
+    const build = () => {
+      const policy = makePolicy();
+      declare(policy);
+      policy.targets.release.networkConfiguration = {
+        environment: networkId,
+        variables: { CHAIN: "XION_CHAIN_ID" },
+      };
+      return policy;
+    };
+    assert.deepEqual(
+      validate(build()).targets.release.networkConfiguration,
+      build().targets.release.networkConfiguration,
+    );
+    for (const [mutate, expected] of [
+      [
+        (t) => delete t.configurationEnvironment,
+        /configurationEnvironment must be a 26-character/,
+      ],
+      [
+        (t) => (t.configurationEnvironment = networkId),
+        /Environments must differ/,
+      ],
+      [
+        (t) => (t.networkConfiguration = null),
+        /networkConfiguration must be an object/,
+      ],
+      [
+        (t) => (t.networkConfiguration.environment = "nickname"),
+        /networkConfiguration.environment must be/,
+      ],
+      [
+        (t) => (t.networkConfiguration.variables = {}),
+        /must be a non-empty map/,
+      ],
+      [
+        (t) => (t.networkConfiguration.variables = { CHAIN: "lowercase" }),
+        /uppercase network keys/,
+      ],
+      [
+        (t) => (t.networkConfiguration.variables = { CHAIN: "LOCAL_MODE" }),
+        /shadows a network key/,
+      ],
+      [
+        (t) =>
+          (t.networkConfiguration.variables = { API_TOKEN: "XION_CHAIN_ID" }),
+        /must map a declared public/,
+      ],
+    ]) {
+      const policy = build();
+      mutate(policy.targets.release);
+      assert.throws(() => validate(policy), expected);
+    }
+    const legacy = makePolicy();
+    legacy.targets.release.networkConfiguration =
+      build().targets.release.networkConfiguration;
+    assert.throws(() => validate(legacy), /requires .*onePasswordTokenSecret/);
+  }
+});

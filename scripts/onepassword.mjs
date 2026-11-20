@@ -1,4 +1,3 @@
-// One 1Password Environment supplies exactly the runtime names in the policy.
 const environmentIdPattern = /^[a-z2-7]{26}$/;
 const namePattern = /^[A-Z][A-Z0-9_]*$/;
 
@@ -14,8 +13,63 @@ export function validateEnvironmentId(id, label) {
   return id;
 }
 
-/** Validate names and concealment without printing any stored values. */
-export function environmentValues(entries, { secrets, variables }) {
+/** Validate the allocation of runtime keys between app and public network data. */
+export function validateConfigurationSources(target, names, label) {
+  const { configurationEnvironment, networkConfiguration } = target;
+  if (networkConfiguration === undefined) {
+    validateEnvironmentId(
+      configurationEnvironment,
+      `${label}.configurationEnvironment`,
+    );
+    return;
+  }
+  const networkLabel = `${label}.networkConfiguration`;
+  check(
+    networkConfiguration !== null &&
+      typeof networkConfiguration === "object" &&
+      !Array.isArray(networkConfiguration),
+    `${networkLabel} must be an object`,
+  );
+  const { environment, variables } = networkConfiguration;
+  validateEnvironmentId(environment, `${networkLabel}.environment`);
+  check(
+    variables &&
+      typeof variables === "object" &&
+      !Array.isArray(variables) &&
+      Object.keys(variables).length > 0,
+    `${networkLabel}.variables must be a non-empty map of runtime names to network keys`,
+  );
+  const appNames = [
+    ...names.secrets,
+    ...names.variables.filter((name) => !Object.hasOwn(variables, name)),
+  ];
+  for (const [name, key] of Object.entries(variables)) {
+    check(
+      names.variables.includes(name),
+      `${networkLabel}.variables must map a declared public runtime name: ${name}`,
+    );
+    check(
+      typeof key === "string" && namePattern.test(key),
+      `${networkLabel}.variables must use uppercase network keys`,
+    );
+    check(
+      !appNames.includes(key),
+      `App runtime name ${key} shadows a network key`,
+    );
+  }
+  if (configurationEnvironment !== undefined || appNames.length > 0) {
+    validateEnvironmentId(
+      configurationEnvironment,
+      `${label}.configurationEnvironment`,
+    );
+    check(
+      configurationEnvironment !== environment,
+      `${label} app and network Environments must differ`,
+    );
+  }
+}
+
+function indexEntries(entries) {
   check(Array.isArray(entries), "1Password Environment response is malformed");
   const byName = new Map();
   for (const entry of entries) {
@@ -27,6 +81,12 @@ export function environmentValues(entries, { secrets, variables }) {
     check(!byName.has(name), `1Password Environment lists ${name} twice`);
     byName.set(name, entry);
   }
+  return byName;
+}
+
+/** Validate names and concealment without printing any stored values. */
+export function environmentValues(entries, { secrets, variables }) {
+  const byName = indexEntries(entries);
   const declared = new Set([...secrets, ...variables]);
   const undeclared = [...byName.keys()].filter((name) => !declared.has(name));
   check(
@@ -67,7 +127,7 @@ export function environmentValues(entries, { secrets, variables }) {
 }
 
 /** Read the Environment through the pinned CLI without logging its output. */
-export async function loadEnvironment(run, id) {
+export async function loadEnvironment(run, id, reveal = true) {
   validateEnvironmentId(id, "The 1Password configuration");
   try {
     return JSON.parse(
@@ -76,7 +136,7 @@ export async function loadEnvironment(run, id) {
         "secret",
         "list",
         id,
-        "--reveal",
+        ...(reveal ? ["--reveal"] : []),
         "--format",
         "json",
       ]),
@@ -84,6 +144,57 @@ export async function loadEnvironment(run, id) {
   } catch {
     throw new Error("Unable to read the 1Password Environment");
   }
+}
+
+/** Read and compose independent sources without letting either override the other. */
+export async function loadConfiguration(run, target, names) {
+  validateConfigurationSources(target, names, "The 1Password configuration");
+  const { configurationEnvironment, networkConfiguration } = target;
+  if (!networkConfiguration) {
+    return environmentValues(
+      await loadEnvironment(run, configurationEnvironment),
+      names,
+    );
+  }
+
+  const mappings = networkConfiguration.variables;
+  const appNames = {
+    secrets: names.secrets,
+    variables: names.variables.filter((name) => !Object.hasOwn(mappings, name)),
+  };
+  const ignored = new Set([
+    ...Object.keys(mappings),
+    ...Object.values(mappings),
+  ]);
+  const appEntries = configurationEnvironment
+    ? await loadEnvironment(run, configurationEnvironment)
+    : [];
+  for (const name of indexEntries(appEntries).keys()) {
+    check(
+      !ignored.has(name),
+      `App Environment entry ${name} shadows a network value`,
+    );
+  }
+  const result = environmentValues(appEntries, appNames);
+  // Fetch the shared Environment without revealing concealed fields, then copy
+  // only the public keys this target declares.
+  const networkEntries = indexEntries(
+    await loadEnvironment(run, networkConfiguration.environment, false),
+  );
+  for (const [name, key] of Object.entries(mappings)) {
+    const entry = networkEntries.get(key);
+    check(entry, `Network Environment is missing entry ${key}`);
+    check(
+      entry.concealed === false,
+      `Network entry ${key} must be a public value`,
+    );
+    check(
+      typeof entry.value === "string" && entry.value.trim() !== "",
+      `Network entry ${key} is empty or malformed`,
+    );
+    result.vars[name] = entry.value;
+  }
+  return result;
 }
 
 /** Workflow-command masks for every secret value, line by line. */

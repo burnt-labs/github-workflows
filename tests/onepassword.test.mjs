@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   environmentValues,
   loadEnvironment,
+  loadConfiguration,
   maskCommands,
   validateEnvironmentId,
 } from "../scripts/onepassword.mjs";
@@ -137,5 +138,102 @@ test("every secret line is masked; public values are not", () => {
       "::add-mask::abc",
       "::add-mask::-----END-----",
     ],
+  );
+});
+
+const networkId = "czahekt2sougvaklfeqwocb5si";
+const target = {
+  configurationEnvironment: id,
+  networkConfiguration: {
+    environment: networkId,
+    variables: { CHAIN_ID: "XION_CHAIN_ID", API_URL: "XION_RPC_URL" },
+  },
+};
+const combinedNames = { ...names, variables: [...names.variables, "CHAIN_ID"] };
+const app = [complete[0], complete[2]];
+const network = [
+  entry("XION_CHAIN_ID", "xion-testnet-2"),
+  entry("XION_RPC_URL", "https://rpc.example.test"),
+  entry("XION_REST_URL", "https://rest.example.test"),
+  { name: "OTHER_WORKLOAD_TOKEN", concealed: true },
+];
+
+function cli(appEntries = app, networkEntries = network) {
+  return async (args) => {
+    if (args[3] === id) {
+      assert.ok(args.includes("--reveal"));
+      return JSON.stringify(appEntries);
+    }
+    assert.equal(args[3], networkId);
+    assert.ok(!args.includes("--reveal"));
+    return JSON.stringify(networkEntries);
+  };
+}
+
+test("composes app entries and selected network aliases with exact name matching", async () => {
+  assert.deepEqual(await loadConfiguration(cli(), target, combinedNames), {
+    secrets: { API_TOKEN: complete[0].value },
+    vars: {
+      LOG_LEVEL: "",
+      CHAIN_ID: "xion-testnet-2",
+      API_URL: "https://rpc.example.test",
+    },
+  });
+  assert.deepEqual(
+    await loadConfiguration(
+      cli(),
+      { networkConfiguration: target.networkConfiguration },
+      { secrets: [], variables: ["CHAIN_ID", "API_URL"] },
+    ),
+    {
+      secrets: {},
+      vars: { CHAIN_ID: "xion-testnet-2", API_URL: "https://rpc.example.test" },
+    },
+  );
+  assert.deepEqual(
+    await loadConfiguration(
+      async () => JSON.stringify(complete),
+      { configurationEnvironment: id },
+      names,
+    ),
+    environmentValues(complete, names),
+  );
+});
+
+test("fails closed on source conflicts, missing and concealed network entries", async () => {
+  for (const duplicate of ["CHAIN_ID", "XION_CHAIN_ID"]) {
+    await assert.rejects(
+      loadConfiguration(
+        cli([...app, entry(duplicate, "old")]),
+        target,
+        combinedNames,
+      ),
+      /shadows a network value/,
+    );
+  }
+  for (const [entries, message] of [
+    [network.slice(1), /missing entry XION_CHAIN_ID/],
+    [
+      [entry("XION_CHAIN_ID", "hidden", true), ...network.slice(1)],
+      /must be a public value/,
+    ],
+    [[entry("XION_CHAIN_ID", " "), ...network.slice(1)], /empty or malformed/],
+    [[...network, network[0]], /lists XION_CHAIN_ID twice/],
+  ]) {
+    await assert.rejects(
+      loadConfiguration(cli(app, entries), target, combinedNames),
+      message,
+    );
+  }
+  await assert.rejects(
+    loadConfiguration(
+      async (args) => {
+        if (args[3] === networkId) throw new Error("internal denied context");
+        return JSON.stringify(app);
+      },
+      target,
+      combinedNames,
+    ),
+    /Unable to read the 1Password Environment/,
   );
 });

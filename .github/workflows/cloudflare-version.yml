@@ -53,6 +53,9 @@ permissions:
 
 jobs:
   version:
+    if: >-
+      fromJSON(inputs.deployment-policy).configurationSource != '1password' ||
+      !contains(fromJSON('["pull_request","pull_request_target"]'), github.event_name)
     name: ${{ inputs.target }} ${{ inputs.operation }}
     runs-on: ${{ fromJSON(inputs.deployment-policy).containers && 'ubicloud-standard-8' || 'ubicloud-standard-4' }}
     concurrency:
@@ -126,10 +129,8 @@ jobs:
           ref: ce0f2df3252ba169e71e794855e7bf1facf2ffe7 # unreleased
           path: .burnt-workflows
           persist-credentials: false
-      # A 1Password-sourced policy reads the target's Environment (one entry per
-      # declared name) into a private {vars, secrets} file that the steps below
-      # consume exactly as they consume a bundle. Previews load it too, so a
-      # missing entry or mismatched concealment flag fails before anything is built.
+      # The loader resolves the selected target's runtime values into the
+      # private {vars, secrets} file consumed by the deployment steps.
       - name: Install 1Password CLI
         if: fromJSON(inputs.deployment-policy).configurationSource == '1password'
         uses: 1password/install-cli-action@1a3160d5e9de1ae0803eaa08a88746f5ae3daa50 # v4.1.0
@@ -141,6 +142,7 @@ jobs:
         env:
           OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets[fromJSON(inputs.deployment-policy).onePasswordTokenSecret] }}
           CONFIGURATION_ENVIRONMENT: ${{ fromJSON(inputs.deployment-policy).targets[inputs.target].configurationEnvironment }}
+          NETWORK_CONFIGURATION: ${{ toJSON(fromJSON(inputs.deployment-policy).targets[inputs.target].networkConfiguration) }}
           SECRET_NAMES: ${{ toJSON(fromJSON(inputs.deployment-policy).workerSecrets) }}
           VARIABLE_NAMES: ${{ toJSON(fromJSON(inputs.deployment-policy).workerVariables) }}
           OUTPUT_FILE: ${{ runner.temp }}/environment.json
