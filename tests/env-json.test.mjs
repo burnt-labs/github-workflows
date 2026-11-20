@@ -11,6 +11,7 @@ import {
   removeSecretsFile,
   validateEnvironmentBundle,
 } from "../scripts/env-json.mjs";
+import { parseJsonc } from "../scripts/policy.mjs";
 
 function fixture(t) {
   const root = fs.realpathSync(
@@ -312,6 +313,65 @@ test("bundled CLI materializes with no dependencies or secret logging", (t) => {
   assert.equal(collected.stdout + collected.stderr, "");
 });
 
+test("a 1Password-sourced policy materializes from the loader's private file", (t) => {
+  const options = fixture(t);
+  delete options.policy.environmentSecret;
+  options.policy.onePasswordTokenSecret = "OP_DEPLOY_SERVICE_ACCOUNT_TOKEN";
+  options.policy.targets.candidate.configurationItem =
+    "op://deploy/service staging";
+  options.policy.targets.release.configurationItem =
+    "op://deploy/service production";
+  const file = path.join(options.runnerTemp, "environment.json");
+  fs.writeFileSync(file, options.bundle, { mode: 0o600 });
+  const run = (phase) =>
+    spawnSync(
+      process.execPath,
+      [path.resolve("scripts/env-json.bundle.mjs"), phase],
+      {
+        cwd: options.root,
+        encoding: "utf8",
+        env: {
+          PATH: process.env.PATH,
+          GITHUB_WORKSPACE: options.root,
+          RUNNER_TEMP: options.runnerTemp,
+          TARGET: options.target,
+          OPERATION: "deploy",
+          DEPLOYMENT_POLICY: JSON.stringify(options.policy),
+          ENVIRONMENT_JSON: "",
+          ENVIRONMENT_JSON_FILE: file,
+        },
+      },
+    );
+  const prepared = run("prepare");
+  assert.equal(prepared.status, 0, prepared.stderr);
+  const generated = parseJsonc(
+    fs.readFileSync(
+      path.join(options.root, "worker", ".wrangler.staging.generated.jsonc"),
+      "utf8",
+    ),
+  );
+  assert.deepEqual(generated.env.staging.vars, JSON.parse(options.bundle).vars);
+  const collected = run("secrets");
+  assert.equal(collected.status, 0, collected.stderr);
+  assert.equal(collected.stdout + collected.stderr, "");
+  assert.deepEqual(
+    JSON.parse(
+      fs.readFileSync(
+        path.join(options.runnerTemp, "worker-secrets.json"),
+        "utf8",
+      ),
+    ),
+    JSON.parse(options.bundle).secrets,
+  );
+  fs.rmSync(file);
+  const missing = run("secrets");
+  assert.equal(missing.status, 1);
+  assert.doesNotMatch(
+    missing.stdout + missing.stderr,
+    /super-private-runtime-marker/,
+  );
+});
+
 test("outside working directories and absent bundle policies fail closed", (t) => {
   const options = fixture(t);
   options.policy.workingDirectory = "..";
@@ -329,7 +389,7 @@ test("outside working directories and absent bundle policies fail closed", (t) =
   options.policy.workerVariables = [];
   assert.throws(
     () => materializePublicConfiguration(options),
-    /environmentSecret is required/,
+    /environmentSecret or onePasswordTokenSecret is required/,
   );
   options.policy.environmentSecret = "SERVICE_ENV_JSON";
   options.policy.workerVariables = ["API_URL", "EMPTY"];

@@ -5,6 +5,7 @@ import { parse, printParseErrorCode } from "jsonc-parser";
 import { validateBuildInputs } from "./frontend-build.mjs";
 import { validateInfrastructure } from "./phala-setup.mjs";
 import { validateTargetConfiguration } from "./phala-configuration.mjs";
+import { validateItemReference } from "./onepassword.mjs";
 
 const QUALITY_PATH = ".github/quality-policy.jsonc";
 const DEPLOYMENT_PATH = ".github/deployment-policy.jsonc";
@@ -263,8 +264,42 @@ export function validateDeploymentPolicy(policy) {
         );
     }
   }
-  if (!policy.environmentSecret && policy.workerVariables.length)
-    throw new Error("deployment workerVariables requires environmentSecret");
+  // Runtime configuration has exactly one source per policy: individual GitHub
+  // Environment secrets, the legacy JSON bundle, or a 1Password item per target
+  // (one custom field per declared name). New policies use 1Password.
+  if (policy.onePasswordTokenSecret === undefined)
+    policy.onePasswordTokenSecret = "";
+  if (
+    typeof policy.onePasswordTokenSecret !== "string" ||
+    (policy.onePasswordTokenSecret !== "" &&
+      !/^[A-Z][A-Z0-9_]*$/.test(policy.onePasswordTokenSecret))
+  )
+    throw new Error(
+      "deployment onePasswordTokenSecret must be an uppercase secret name",
+    );
+  if (policy.onePasswordTokenSecret && policy.environmentSecret)
+    throw new Error(
+      "deployment runtime configuration comes from onePasswordTokenSecret or environmentSecret, not both",
+    );
+  if (
+    policy.onePasswordTokenSecret &&
+    [...policy.workerVariables, ...policy.workerSecrets].some(
+      (name) =>
+        controlNames.has(name) || name === policy.onePasswordTokenSecret,
+    )
+  )
+    throw new Error(
+      "deployment runtime configuration must not name a control credential",
+    );
+  policy.configurationSource = policy.onePasswordTokenSecret
+    ? "1password"
+    : policy.environmentSecret
+      ? "bundle"
+      : "github";
+  if (policy.configurationSource === "github" && policy.workerVariables.length)
+    throw new Error(
+      "deployment workerVariables requires onePasswordTokenSecret or environmentSecret",
+    );
   if (
     policy.environmentSecret &&
     [...policy.workerVariables, ...policy.workerSecrets].includes(
@@ -280,8 +315,13 @@ export function validateDeploymentPolicy(policy) {
   if (policy.verificationSecrets === undefined) policy.verificationSecrets = [];
   if (!Array.isArray(policy.verificationSecrets))
     throw new Error("deployment verificationSecrets must be an array");
-  if (policy.verificationSecrets.length && !policy.environmentSecret)
-    throw new Error("verificationSecrets requires environmentSecret");
+  if (
+    policy.verificationSecrets.length &&
+    policy.configurationSource === "github"
+  )
+    throw new Error(
+      "verificationSecrets requires onePasswordTokenSecret or environmentSecret",
+    );
   const verification = new Set();
   for (const name of policy.verificationSecrets) {
     if (!policy.workerSecrets.includes(name) || controlNames.has(name))
@@ -350,6 +390,19 @@ export function validateDeploymentPolicy(policy) {
     for (const field of ["githubEnvironment", "url"]) {
       requireString(target[field], `deployment targets.${role}.${field}`);
     }
+    if (policy.configurationSource === "1password")
+      validateItemReference(
+        target.configurationItem,
+        `deployment targets.${role}.configurationItem`,
+      );
+    else if (
+      target.configurationItem !== undefined &&
+      target.configurationItem !== ""
+    )
+      throw new Error(
+        `deployment targets.${role}.configurationItem requires onePasswordTokenSecret`,
+      );
+    else target.configurationItem = "";
 
     if (single) {
       // There is no wrangler environment to name. These repositories have no
@@ -383,6 +436,15 @@ export function validateDeploymentPolicy(policy) {
         `verificationSecrets requires targets.${role}.commands.afterDeploy`,
       );
     }
+    // Public vars generate a target Wrangler config; secrets alone do not.
+    if (
+      policy.configurationSource === "1password" &&
+      policy.workerVariables.length &&
+      target.wranglerConfig === undefined
+    )
+      throw new Error(
+        `1Password workerVariables require targets.${role}.wranglerConfig`,
+      );
     if (policy.environmentSecret && target.wranglerConfig === undefined) {
       throw new Error(
         `environmentSecret requires targets.${role}.wranglerConfig`,
@@ -616,6 +678,22 @@ export function validatePhalaPolicy(policy) {
   ) {
     throw new Error("Phala credential secret names must differ");
   }
+  // Runtime values come either from the target GitHub Environment (one secret or
+  // variable per name) or from one 1Password item per target.
+  const onePasswordToken = policy.credentials.onePasswordTokenSecret;
+  if (onePasswordToken !== undefined) {
+    requireString(onePasswordToken, "Phala credentials.onePasswordTokenSecret");
+    if (
+      !/^[A-Z][A-Z0-9_]*$/.test(onePasswordToken) ||
+      [
+        policy.credentials.phalaApiKeySecret,
+        policy.credentials.registryPasswordSecret,
+      ].includes(onePasswordToken)
+    )
+      throw new Error(
+        "Phala credentials.onePasswordTokenSecret must be a distinct uppercase secret name",
+      );
+  }
 
   const reserved = [
     "GITHUB_TOKEN",
@@ -625,6 +703,7 @@ export function validatePhalaPolicy(policy) {
     policy.image.composeVariable,
     policy.credentials.phalaApiKeySecret,
     policy.credentials.registryPasswordSecret,
+    ...(onePasswordToken ? [onePasswordToken] : []),
   ];
   const secretNames = validateEnvironmentNames(
     policy.runtimeSecrets,
@@ -654,6 +733,19 @@ export function validatePhalaPolicy(policy) {
       `Phala targets.${role}.githubEnvironment`,
     );
     requireString(target.cvmName, `Phala targets.${role}.cvmName`);
+    if (onePasswordToken) {
+      validateItemReference(
+        target.configurationItem,
+        `Phala targets.${role}.configurationItem`,
+      );
+      if (target.configuration !== undefined)
+        throw new Error(
+          `Phala targets.${role} takes its values from configurationItem, not a configuration bundle`,
+        );
+    } else if (target.configurationItem !== undefined)
+      throw new Error(
+        `Phala targets.${role}.configurationItem requires credentials.onePasswordTokenSecret`,
+      );
     if (target.setup !== undefined) validateInfrastructure(target.setup);
     validateTargetConfiguration(target, policy.runtimeVariables);
     if (target.configuration && reserved.includes(target.configuration.secret))

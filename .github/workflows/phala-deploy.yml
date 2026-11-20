@@ -71,7 +71,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: burnt-labs/github-workflows
-          ref: 876ce925a9ba02058d98947ad5c42bcd45f34eab # unreleased
+          ref: 2f796adabe5f6035126668257b20a1edcfc3264f # unreleased
           path: .burnt-workflows
       - id: policy
         name: Require and validate Phala policy
@@ -81,7 +81,7 @@ jobs:
     needs: policy
     # A reseal builds nothing, so there is no consumer code to gate.
     if: inputs.operation != 'reseal'
-    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@18ac34fe76ba39f6712cb9a6e503ad3cf5e57949 # unreleased
+    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@b1a476b2f2f8906e17d2d5fa7309fd7d0fc6fd30 # unreleased
 
   deploy:
     name: Phala ${{ inputs.target }}
@@ -154,6 +154,36 @@ jobs:
             echo "repository=ghcr.io/${repository}/${IMAGE_NAME}"
             echo "image=ghcr.io/${repository}/${IMAGE_NAME}:${GITHUB_SHA}"
           } >> "$GITHUB_OUTPUT"
+      # A policy naming credentials.onePasswordTokenSecret takes its runtime values
+      # from the target's 1Password item (one custom field per declared name),
+      # never from the GitHub Environment.
+      - name: Checkout central configuration tools
+        if: fromJSON(needs.policy.outputs.phala).credentials.onePasswordTokenSecret != null
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: burnt-labs/github-workflows
+          ref: 2f796adabe5f6035126668257b20a1edcfc3264f # unreleased
+          path: .burnt-config-tools
+          persist-credentials: false
+      - name: Move configuration tooling outside the image build context
+        if: fromJSON(needs.policy.outputs.phala).credentials.onePasswordTokenSecret != null
+        run: |
+          test ! -e "$RUNNER_TEMP/burnt-config-tools"
+          mv .burnt-config-tools "$RUNNER_TEMP/burnt-config-tools"
+      - name: Install 1Password CLI
+        if: fromJSON(needs.policy.outputs.phala).credentials.onePasswordTokenSecret != null
+        uses: 1password/install-cli-action@1a3160d5e9de1ae0803eaa08a88746f5ae3daa50 # v4.1.0
+        with:
+          version: 2.41.1
+      - name: Load runtime configuration from 1Password
+        if: fromJSON(needs.policy.outputs.phala).credentials.onePasswordTokenSecret != null
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets[fromJSON(needs.policy.outputs.phala).credentials.onePasswordTokenSecret] }}
+          CONFIGURATION_ITEM: ${{ fromJSON(needs.policy.outputs.phala).targets[inputs.target].configurationItem }}
+          SECRET_NAMES: ${{ toJSON(fromJSON(needs.policy.outputs.phala).runtimeSecrets) }}
+          VARIABLE_NAMES: ${{ toJSON(fromJSON(needs.policy.outputs.phala).runtimeVariables) }}
+          OUTPUT_FILE: ${{ runner.temp }}/phala-runtime.json
+        run: node "$RUNNER_TEMP/burnt-config-tools/scripts/onepassword-cli.mjs"
       - name: Collect deployment credentials and runtime configuration
         env:
           ALL_SECRETS: ${{ toJSON(secrets) }}
@@ -174,6 +204,14 @@ jobs:
           const secretNames = JSON.parse(process.env.SECRET_NAMES);
           const variableNames = JSON.parse(process.env.VARIABLE_NAMES);
           const target = JSON.parse(process.env.TARGET_CONFIGURATION);
+          // 1Password-sourced runtime values replace the GitHub Environment's.
+          const itemFile = `${process.env.RUNNER_TEMP}/phala-runtime.json`;
+          if (fs.existsSync(itemFile)) {
+            const loaded = JSON.parse(fs.readFileSync(itemFile, "utf8"));
+            fs.rmSync(itemFile, { force: true });
+            for (const name of secretNames) secrets[name] = loaded.secrets[name];
+            for (const name of variableNames) variables[name] = loaded.vars[name];
+          }
           // Default deploys retain legacy per-key variables; bundles are for setup/update.
           const useConfiguration = (process.env.PHALA_OPERATION || "deploy") !== "deploy" && target.configuration;
           if (useConfiguration) {
@@ -235,7 +273,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: burnt-labs/github-workflows
-          ref: 92c89dfc27e166225410ec949586c023e2671ba9 # unreleased
+          ref: 2f796adabe5f6035126668257b20a1edcfc3264f # unreleased
           path: .burnt-registry-tools
           persist-credentials: false
       # The CVM pulls a prebuilt image with the sealed registry login, so prove
@@ -482,7 +520,7 @@ jobs:
           retention-days: 30
       - name: Remove temporary deployment credentials
         if: ${{ always() }}
-        run: rm -f "$RUNNER_TEMP/phala-api-key" "$RUNNER_TEMP/phala.env" "$RUNNER_TEMP/phala-target.json"
+        run: rm -f "$RUNNER_TEMP/phala-api-key" "$RUNNER_TEMP/phala.env" "$RUNNER_TEMP/phala-target.json" "$RUNNER_TEMP/phala-runtime.json"
 
   reseal:
     # Re-applies an existing CVM's sealed environment from policy and restarts it. No image
@@ -513,12 +551,27 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: burnt-labs/github-workflows
-          ref: 92c89dfc27e166225410ec949586c023e2671ba9 # unreleased
+          ref: 2f796adabe5f6035126668257b20a1edcfc3264f # unreleased
           path: .burnt-phala-tools
           persist-credentials: false
+      - name: Install 1Password CLI
+        if: fromJSON(needs.policy.outputs.phala).credentials.onePasswordTokenSecret != null
+        uses: 1password/install-cli-action@1a3160d5e9de1ae0803eaa08a88746f5ae3daa50 # v4.1.0
+        with:
+          version: 2.41.1
+      - name: Load runtime configuration from 1Password
+        if: fromJSON(needs.policy.outputs.phala).credentials.onePasswordTokenSecret != null
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets[fromJSON(needs.policy.outputs.phala).credentials.onePasswordTokenSecret] }}
+          CONFIGURATION_ITEM: ${{ fromJSON(needs.policy.outputs.phala).targets[inputs.target].configurationItem }}
+          SECRET_NAMES: ${{ toJSON(fromJSON(needs.policy.outputs.phala).runtimeSecrets) }}
+          VARIABLE_NAMES: ${{ toJSON(fromJSON(needs.policy.outputs.phala).runtimeVariables) }}
+          OUTPUT_FILE: ${{ runner.temp }}/phala-runtime.json
+        run: node .burnt-phala-tools/scripts/onepassword-cli.mjs
       - name: Reseal and restart the CVM
         id: reseal
         env:
+          RUNTIME_CONFIGURATION_FILE: ${{ runner.temp }}/phala-runtime.json
           ALL_SECRETS: ${{ toJSON(secrets) }}
           ALL_VARIABLES: ${{ toJSON(vars) }}
           PHALA_POLICY: ${{ needs.policy.outputs.phala }}
@@ -541,3 +594,6 @@ jobs:
           done
           echo "::error::Phala reseal health check failed after 60 attempts"
           exit 1
+      - name: Remove 1Password runtime configuration
+        if: ${{ always() }}
+        run: rm -f "$RUNNER_TEMP/phala-runtime.json"

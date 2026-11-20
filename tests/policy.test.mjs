@@ -155,6 +155,13 @@ test("deployment accepts the topology environments", () => {
   for (const topology of ["standard", "chain"]) {
     assert.deepEqual(validateDeploymentPolicy(deploymentPolicy(topology)), {
       ...deploymentPolicy(topology),
+      targets: Object.fromEntries(
+        Object.entries(deploymentPolicy(topology).targets).map(
+          ([role, target]) => [role, { ...target, configurationItem: "" }],
+        ),
+      ),
+      onePasswordTokenSecret: "",
+      configurationSource: "github",
       previewReleaseOnMain: true,
       releasePrefix: "",
       workerSecrets: [],
@@ -531,6 +538,61 @@ test("Phala deploys a prebuilt image by its full repository", () => {
   assert.throws(() => validatePhalaPolicy(built), /image\.dockerfile/);
 });
 
+test("Phala runtime values can come from one 1Password item per target", () => {
+  const onePassword = () => {
+    const policy = phalaPolicy();
+    policy.credentials.onePasswordTokenSecret =
+      "OP_DEPLOY_SERVICE_ACCOUNT_TOKEN";
+    policy.targets.candidate.configurationItem =
+      "op://Deploy Config/service staging";
+    policy.targets.release.configurationItem =
+      "op://Deploy Config/service production";
+    return policy;
+  };
+  assert.deepEqual(validatePhalaPolicy(onePassword()), onePassword());
+  for (const [mutate, pattern] of [
+    [
+      (policy) => delete policy.targets.candidate.configurationItem,
+      /targets\.candidate\.configurationItem must be an op:\/\/<vault>\/<item>/,
+    ],
+    [
+      (policy) => (policy.targets.release.configurationItem = "staging"),
+      /targets\.release\.configurationItem must be/,
+    ],
+    [
+      (policy) =>
+        (policy.credentials.onePasswordTokenSecret = "REGISTRY_PASSWORD"),
+      /distinct uppercase secret name/,
+    ],
+    [
+      (policy) => (policy.credentials.onePasswordTokenSecret = "op"),
+      /distinct uppercase secret name/,
+    ],
+    [
+      (policy) => policy.runtimeSecrets.push("OP_DEPLOY_SERVICE_ACCOUNT_TOKEN"),
+      /reserved name/,
+    ],
+    [
+      (policy) =>
+        (policy.targets.release.configuration = {
+          secret: "SERVICE_CONFIG",
+          runtimeValues: { LOG_LEVEL: { value: "info" } },
+        }),
+      /takes its values from configurationItem, not a configuration bundle/,
+    ],
+  ]) {
+    const policy = onePassword();
+    mutate(policy);
+    assert.throws(() => validatePhalaPolicy(policy), pattern);
+  }
+  const stray = phalaPolicy();
+  stray.targets.release.configurationItem = "op://deploy/service";
+  assert.throws(
+    () => validatePhalaPolicy(stray),
+    /configurationItem requires credentials\.onePasswordTokenSecret/,
+  );
+});
+
 test("Phala targets may name the public URL they serve", () => {
   const policy = phalaPolicy();
   policy.targets.release.publicUrl = "https://service.example.com";
@@ -812,6 +874,102 @@ test("individual Worker secret policies retain their existing allowed names", ()
   for (const target of Object.values(policy.targets))
     target.wranglerConfig = ".wrangler.generated.jsonc";
   assert.throws(() => validateDeploymentPolicy(policy), /control credential/);
+});
+
+test("runtime configuration can come from one 1Password item per target", () => {
+  const onePassword = () => {
+    const policy = deploymentPolicy();
+    policy.onePasswordTokenSecret = "OP_DEPLOY_SERVICE_ACCOUNT_TOKEN";
+    policy.workerVariables = ["API_URL"];
+    policy.workerSecrets = ["API_TOKEN"];
+    policy.verificationSecrets = ["API_TOKEN"];
+    policy.targets.candidate.configurationItem =
+      "op://Deploy Config/service staging";
+    policy.targets.release.configurationItem =
+      "op://Deploy Config/service production";
+    policy.targets.release.commands = { afterDeploy: "node verify.mjs" };
+    policy.targets.candidate.commands = { afterDeploy: "node verify.mjs" };
+    policy.targets.candidate.wranglerConfig =
+      ".wrangler.staging.generated.jsonc";
+    policy.targets.release.wranglerConfig =
+      ".wrangler.production.generated.jsonc";
+    return policy;
+  };
+  const validated = validateDeploymentPolicy(onePassword());
+  assert.equal(validated.configurationSource, "1password");
+  assert.equal(
+    validated.targets.release.configurationItem,
+    "op://Deploy Config/service production",
+  );
+  // Normalization is idempotent.
+  assert.deepEqual(
+    validateDeploymentPolicy(structuredClone(validated)),
+    validated,
+  );
+  assert.equal(
+    validateDeploymentPolicy(deploymentPolicy()).configurationSource,
+    "github",
+  );
+
+  for (const [mutate, pattern] of [
+    [
+      (policy) => delete policy.targets.release.wranglerConfig,
+      /1Password workerVariables require targets\.release\.wranglerConfig/,
+    ],
+    [
+      (policy) => delete policy.targets.release.configurationItem,
+      /targets\.release\.configurationItem must be an op:\/\/<vault>\/<item>/,
+    ],
+    [
+      (policy) =>
+        (policy.targets.candidate.configurationItem =
+          "op://vault/item/API_TOKEN"),
+      /targets\.candidate\.configurationItem must be/,
+    ],
+    [
+      (policy) => (policy.onePasswordTokenSecret = "op-token"),
+      /onePasswordTokenSecret must be an uppercase secret name/,
+    ],
+    [
+      (policy) => (policy.environmentSecret = "SERVICE_ENV_JSON"),
+      /onePasswordTokenSecret or environmentSecret, not both/,
+    ],
+    [
+      (policy) => policy.workerSecrets.push("OP_DEPLOY_SERVICE_ACCOUNT_TOKEN"),
+      /must not name a control credential/,
+    ],
+    [
+      (policy) => policy.workerSecrets.push("GHCR_READ_TOKEN"),
+      /must not name a control credential/,
+    ],
+  ]) {
+    const policy = onePassword();
+    mutate(policy);
+    assert.throws(() => validateDeploymentPolicy(policy), pattern);
+  }
+
+  // Secrets alone need no generated Wrangler config.
+  const secretsOnly = onePassword();
+  secretsOnly.workerVariables = [];
+  delete secretsOnly.targets.candidate.wranglerConfig;
+  delete secretsOnly.targets.release.wranglerConfig;
+  assert.equal(
+    validateDeploymentPolicy(secretsOnly).configurationSource,
+    "1password",
+  );
+
+  const stray = deploymentPolicy();
+  stray.targets.candidate.configurationItem = "op://deploy/service";
+  assert.throws(
+    () => validateDeploymentPolicy(stray),
+    /configurationItem requires onePasswordTokenSecret/,
+  );
+  const variablesOnly = deploymentPolicy();
+  variablesOnly.workerVariables = ["API_URL"];
+  assert.throws(
+    () => validateDeploymentPolicy(variablesOnly),
+    /workerVariables requires onePasswordTokenSecret or environmentSecret/,
+  );
 });
 
 test("verification credentials are a bounded bundle-only subset with a probe", () => {

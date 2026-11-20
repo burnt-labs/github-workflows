@@ -130,7 +130,49 @@ keeps `--env`, because `d1 migrations apply` does not follow the redirect and
 needs `--env` to pick the target's database. Its target must still match.
 Configs without `targetEnvironment` keep `--env`.
 
-### Service environment bundles
+### Runtime configuration from 1Password
+
+Runtime configuration (Worker variables and secrets, Phala runtime secrets and
+variables) is read from **one 1Password item per target**, never from a JSON
+string. The item is the readable, reviewable source of truth; nothing is copied
+into GitHub first.
+
+- **Item shape:** one custom field per declared name, labelled exactly with that
+  name. A **concealed** field is a secret; any other field type (text, URL) is a
+  public value. Built-in fields (username, password, notes) are ignored.
+- **Strict:** a missing, mistyped (secret not concealed, or the reverse),
+  duplicated or undeclared field fails the run before anything builds. Errors
+  name fields, never values, and every secret value is masked first.
+- **Policy:** name the GitHub secret holding a 1Password **service account**
+  token with read access to the item's vault, and give every target its item:
+
+```jsonc
+// deployment-policy.jsonc
+{
+  "onePasswordTokenSecret": "OP_DEPLOY_SERVICE_ACCOUNT_TOKEN",
+  "workerVariables": ["API_URL"],
+  "workerSecrets": ["API_TOKEN"],
+  "targets": {
+    "candidate": { "configurationItem": "op://Deploy Config/service staging" },
+    "release": { "configurationItem": "op://Deploy Config/service production" },
+  },
+}
+// phala-policy.jsonc: credentials.onePasswordTokenSecret, plus
+// targets.<role>.configurationItem; runtimeSecrets/runtimeVariables as before.
+```
+
+The flows install a pinned 1Password CLI, read the item, and hand its values to
+the same materialization (Worker secrets file, generated Wrangler vars, Phala
+sealed env) the other sources use. The private file is always removed.
+`onePasswordTokenSecret` and `environmentSecret` are mutually exclusive.
+
+**JSON bundles are legacy.** `environmentSecret` (one `{vars, secrets}` JSON
+string secret) and Phala `targets.<role>.configuration` keep working for
+existing callers until they move to an item; do not add new ones. Individual
+GitHub Environment secrets (`workerSecrets` with neither source) remain for
+repositories that have not moved yet.
+
+### Service environment bundles (legacy)
 
 Cloudflare deployments can reuse the service bundle shape established by
 [Cue](https://github.com/burnt-labs/cue-app/blob/14bd564aceb6ec475d2e76218878762231a46adb/.agents/knowledge/github-env-json.md).
@@ -626,7 +668,7 @@ Cloudflare consumers can declare target-specific public build inputs and
 checksummed private R2 static assets. See [public frontend build inputs](docs/frontend-build.md)
 for the schema, credential boundary and limits.
 
-### Environment configuration bundles for explicit Phala operations
+### Environment configuration bundles for explicit Phala operations (legacy)
 
 Explicit setup/update can resolve a protected environment's existing JSON
 configuration secret without workstation credentials or consumer deployment

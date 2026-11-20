@@ -94,8 +94,10 @@ export function configurationPaths(root, policy, target) {
 
 function inputs({ policy: rawPolicy, target, bundle, root }) {
   const policy = validateDeploymentPolicy(structuredClone(rawPolicy));
-  if (!policy.environmentSecret)
-    throw new Error("environmentSecret is required for bundle materialization");
+  if (policy.configurationSource === "github")
+    throw new Error(
+      "environmentSecret or onePasswordTokenSecret is required for bundle materialization",
+    );
   if (!["candidate", "release"].includes(target))
     throw new Error("Unknown environment bundle target");
   return {

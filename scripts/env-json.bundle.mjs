@@ -1,5 +1,8 @@
 /* eslint-disable */
 
+// scripts/env-json-cli.mjs
+import fs2 from "node:fs";
+
 // scripts/env-json.mjs
 import fs from "node:fs";
 import path2 from "node:path";
@@ -1103,6 +1106,30 @@ function validateBuildInputs({ buildVariables, buildAssets } = {}) {
   }
 }
 
+// scripts/onepassword.mjs
+var segment = "[^/\\s](?:[^/\\t\\n\\r]*[^/\\s])?";
+var referencePattern = new RegExp(`^op://(${segment})/(${segment})$`);
+function check(condition, message) {
+  if (!condition) throw new Error(message);
+}
+function parseItemReference(reference) {
+  const match =
+    typeof reference === "string" ? reference.match(referencePattern) : null;
+  check(
+    match,
+    "1Password configuration must be an op://<vault>/<item> reference",
+  );
+  return { vault: match[1], item: match[2] };
+}
+function validateItemReference(reference, label) {
+  try {
+    parseItemReference(reference);
+  } catch {
+    throw new Error(`${label} must be an op://<vault>/<item> reference`);
+  }
+  return reference;
+}
+
 // scripts/policy.mjs
 var TOPOLOGIES = {
   standard: { candidate: "staging", release: "production" },
@@ -1255,8 +1282,39 @@ function validateDeploymentPolicy(policy) {
         );
     }
   }
-  if (!policy.environmentSecret && policy.workerVariables.length)
-    throw new Error("deployment workerVariables requires environmentSecret");
+  if (policy.onePasswordTokenSecret === void 0)
+    policy.onePasswordTokenSecret = "";
+  if (
+    typeof policy.onePasswordTokenSecret !== "string" ||
+    (policy.onePasswordTokenSecret !== "" &&
+      !/^[A-Z][A-Z0-9_]*$/.test(policy.onePasswordTokenSecret))
+  )
+    throw new Error(
+      "deployment onePasswordTokenSecret must be an uppercase secret name",
+    );
+  if (policy.onePasswordTokenSecret && policy.environmentSecret)
+    throw new Error(
+      "deployment runtime configuration comes from onePasswordTokenSecret or environmentSecret, not both",
+    );
+  if (
+    policy.onePasswordTokenSecret &&
+    [...policy.workerVariables, ...policy.workerSecrets].some(
+      (name) =>
+        controlNames.has(name) || name === policy.onePasswordTokenSecret,
+    )
+  )
+    throw new Error(
+      "deployment runtime configuration must not name a control credential",
+    );
+  policy.configurationSource = policy.onePasswordTokenSecret
+    ? "1password"
+    : policy.environmentSecret
+      ? "bundle"
+      : "github";
+  if (policy.configurationSource === "github" && policy.workerVariables.length)
+    throw new Error(
+      "deployment workerVariables requires onePasswordTokenSecret or environmentSecret",
+    );
   if (
     policy.environmentSecret &&
     [...policy.workerVariables, ...policy.workerSecrets].includes(
@@ -1270,8 +1328,13 @@ function validateDeploymentPolicy(policy) {
   if (policy.verificationSecrets === void 0) policy.verificationSecrets = [];
   if (!Array.isArray(policy.verificationSecrets))
     throw new Error("deployment verificationSecrets must be an array");
-  if (policy.verificationSecrets.length && !policy.environmentSecret)
-    throw new Error("verificationSecrets requires environmentSecret");
+  if (
+    policy.verificationSecrets.length &&
+    policy.configurationSource === "github"
+  )
+    throw new Error(
+      "verificationSecrets requires onePasswordTokenSecret or environmentSecret",
+    );
   const verification = /* @__PURE__ */ new Set();
   for (const name of policy.verificationSecrets) {
     if (!policy.workerSecrets.includes(name) || controlNames.has(name))
@@ -1320,6 +1383,19 @@ function validateDeploymentPolicy(policy) {
     for (const field of ["githubEnvironment", "url"]) {
       requireString(target[field], `deployment targets.${role}.${field}`);
     }
+    if (policy.configurationSource === "1password")
+      validateItemReference(
+        target.configurationItem,
+        `deployment targets.${role}.configurationItem`,
+      );
+    else if (
+      target.configurationItem !== void 0 &&
+      target.configurationItem !== ""
+    )
+      throw new Error(
+        `deployment targets.${role}.configurationItem requires onePasswordTokenSecret`,
+      );
+    else target.configurationItem = "";
     if (single) {
       if (target.wranglerEnv !== void 0) {
         throw new Error(
@@ -1347,6 +1423,14 @@ function validateDeploymentPolicy(policy) {
         `verificationSecrets requires targets.${role}.commands.afterDeploy`,
       );
     }
+    if (
+      policy.configurationSource === "1password" &&
+      policy.workerVariables.length &&
+      target.wranglerConfig === void 0
+    )
+      throw new Error(
+        `1Password workerVariables require targets.${role}.wranglerConfig`,
+      );
     if (policy.environmentSecret && target.wranglerConfig === void 0) {
       throw new Error(
         `environmentSecret requires targets.${role}.wranglerConfig`,
@@ -1501,8 +1585,10 @@ function configurationPaths(root, policy, target) {
 }
 function inputs({ policy: rawPolicy, target, bundle, root }) {
   const policy = validateDeploymentPolicy(structuredClone(rawPolicy));
-  if (!policy.environmentSecret)
-    throw new Error("environmentSecret is required for bundle materialization");
+  if (policy.configurationSource === "github")
+    throw new Error(
+      "environmentSecret or onePasswordTokenSecret is required for bundle materialization",
+    );
   if (!["candidate", "release"].includes(target))
     throw new Error("Unknown environment bundle target");
   return {
@@ -1602,7 +1688,14 @@ try {
   const options = {
     policy: JSON.parse(process.env.DEPLOYMENT_POLICY),
     target: process.env.TARGET,
-    bundle: process.env.ENVIRONMENT_JSON,
+    // A 1Password-sourced policy has no bundle secret: the loader wrote the same
+    // {vars, secrets} shape to a private file instead.
+    bundle:
+      process.env.ENVIRONMENT_JSON ||
+      (process.env.ENVIRONMENT_JSON_FILE &&
+      fs2.existsSync(process.env.ENVIRONMENT_JSON_FILE)
+        ? fs2.readFileSync(process.env.ENVIRONMENT_JSON_FILE, "utf8")
+        : void 0),
     root: process.env.GITHUB_WORKSPACE,
     runnerTemp: process.env.RUNNER_TEMP,
     operation: process.env.OPERATION,

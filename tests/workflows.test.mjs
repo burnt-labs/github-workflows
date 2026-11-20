@@ -1681,7 +1681,7 @@ test("Cloudflare bundles validate before build and never expose secrets to consu
   );
   assert.equal(
     publicStep.if,
-    "fromJSON(inputs.deployment-policy).environmentSecret != ''",
+    "fromJSON(inputs.deployment-policy).environmentSecret != '' || (fromJSON(inputs.deployment-policy).configurationSource == '1password' && fromJSON(inputs.deployment-policy).workerVariables[0] != null)",
   );
   assert.match(secrets.if, /inputs.operation == 'deploy'/);
   assert.match(
@@ -2002,4 +2002,126 @@ test("Phala deploys a prebuilt image only by an explicit, pullable digest", () =
       "${{ steps.build.outputs.digest || steps.image.outputs.digest }}",
       step.name,
     );
+});
+
+test("Cloudflare reads a 1Password item into the bundle path and always removes it", () => {
+  const workflow = parse(
+    fs.readFileSync(`${directory}/cloudflare-version.yml`, "utf8"),
+  );
+  const steps = Object.values(workflow.jobs)[0].steps;
+  const index = (name) => steps.findIndex((step) => step.name === name);
+  const install = steps[index("Install 1Password CLI")];
+  const load = steps[index("Load runtime configuration from 1Password")];
+  for (const step of [install, load])
+    assert.equal(
+      step.if,
+      "fromJSON(inputs.deployment-policy).configurationSource == '1password'",
+    );
+  assert.match(install.uses, /^1password\/install-cli-action@[0-9a-f]{40}$/);
+  assert.match(install.with.version, /^\d+\.\d+\.\d+$/);
+  assert.equal(load.run, "node .burnt-workflows/scripts/onepassword-cli.mjs");
+  assert.match(
+    load.env.OP_SERVICE_ACCOUNT_TOKEN,
+    /secrets\[fromJSON\(inputs\.deployment-policy\)\.onePasswordTokenSecret\]/,
+  );
+  assert.match(
+    load.env.CONFIGURATION_ITEM,
+    /targets\[inputs\.target\]\.configurationItem/,
+  );
+  assert.match(load.env.SECRET_NAMES, /workerSecrets/);
+  assert.match(load.env.VARIABLE_NAMES, /workerVariables/);
+  assert.equal(load.env.OUTPUT_FILE, "${{ runner.temp }}/environment.json");
+  // The item loads before anything reads runtime values or builds.
+  for (const name of [
+    "Materialize public Worker variables",
+    "Build",
+    "Materialize bundled Worker secrets",
+    "Collect verification secrets",
+  ]) {
+    assert.ok(
+      index(name) > index("Load runtime configuration from 1Password"),
+      name,
+    );
+  }
+  for (const name of [
+    "Materialize public Worker variables",
+    "Materialize bundled Worker secrets",
+    "Collect verification secrets",
+  ])
+    assert.equal(
+      steps[index(name)].env.ENVIRONMENT_JSON_FILE,
+      "${{ runner.temp }}/environment.json",
+      name,
+    );
+  // A policy JSON from an older validator has no configurationSource; it must
+  // still take the individual-secrets path.
+  assert.match(
+    steps.find((step) => step.id === "worker-secrets").if,
+    /configurationSource != '1password' && fromJSON\(inputs\.deployment-policy\)\.environmentSecret == ''/,
+  );
+  const cleanup = steps[index("Remove 1Password runtime configuration")];
+  assert.equal(cleanup.if, "always()");
+  assert.equal(cleanup.run, 'rm -f "$RUNNER_TEMP/environment.json"');
+  assert.equal(
+    index("Remove 1Password runtime configuration"),
+    steps.length - 2,
+  );
+});
+
+test("Phala deploy and reseal read a 1Password item only when policy names its token", () => {
+  const workflow = parse(
+    fs.readFileSync(`${directory}/phala-deploy.yml`, "utf8"),
+  );
+  const token =
+    "fromJSON(needs.policy.outputs.phala).credentials.onePasswordTokenSecret";
+  for (const job of ["deploy", "reseal"]) {
+    const steps = workflow.jobs[job].steps;
+    const index = (name) => steps.findIndex((step) => step.name === name);
+    const install = steps[index("Install 1Password CLI")];
+    const load = steps[index("Load runtime configuration from 1Password")];
+    for (const step of [install, load])
+      assert.equal(step.if, `${token} != null`, job);
+    assert.match(install.uses, /^1password\/install-cli-action@[0-9a-f]{40}$/);
+    assert.match(load.run, /onepassword-cli\.mjs"?$/);
+    assert.match(load.env.OP_SERVICE_ACCOUNT_TOKEN, /onePasswordTokenSecret\]/);
+    assert.match(
+      load.env.CONFIGURATION_ITEM,
+      /targets\[inputs\.target\]\.configurationItem/,
+    );
+    assert.match(load.env.SECRET_NAMES, /runtimeSecrets/);
+    assert.match(load.env.VARIABLE_NAMES, /runtimeVariables/);
+    assert.equal(load.env.OUTPUT_FILE, "${{ runner.temp }}/phala-runtime.json");
+    const consumer =
+      job === "deploy"
+        ? "Collect deployment credentials and runtime configuration"
+        : "Reseal and restart the CVM";
+    assert.ok(
+      index(consumer) > index("Load runtime configuration from 1Password"),
+      job,
+    );
+    const cleanup = steps.filter(
+      (step) =>
+        step.if === "${{ always() }}" &&
+        /phala-runtime\.json/.test(step.run ?? ""),
+    );
+    assert.equal(cleanup.length, 1, job);
+  }
+  const collect = workflow.jobs.deploy.steps.find(
+    (step) =>
+      step.name === "Collect deployment credentials and runtime configuration",
+  );
+  assert.match(collect.run, /phala-runtime\.json/);
+  assert.match(collect.run, /fs\.rmSync\(itemFile/);
+  // The configuration tools leave the build context before the image builds.
+  const steps = workflow.jobs.deploy.steps;
+  const index = (name) => steps.findIndex((step) => step.name === name);
+  assert.ok(
+    index("Move configuration tooling outside the image build context") <
+      index("Build and push image"),
+  );
+  assert.equal(
+    workflow.jobs.reseal.steps.find((step) => step.id === "reseal").env
+      .RUNTIME_CONFIGURATION_FILE,
+    "${{ runner.temp }}/phala-runtime.json",
+  );
 });
