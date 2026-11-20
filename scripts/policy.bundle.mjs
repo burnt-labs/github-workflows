@@ -1158,27 +1158,16 @@ function validateTargetConfiguration(target, names) {
 }
 
 // scripts/onepassword.mjs
-var segment = "[^/\\s](?:[^/\\t\\n\\r]*[^/\\s])?";
-var referencePattern = new RegExp(`^op://(${segment})/(${segment})$`);
+var environmentIdPattern = /^[a-z2-7]{26}$/;
 function check2(condition, message) {
   if (!condition) throw new Error(message);
 }
-function parseItemReference(reference) {
-  const match =
-    typeof reference === "string" ? reference.match(referencePattern) : null;
+function validateEnvironmentId(id, label) {
   check2(
-    match,
-    "1Password configuration must be an op://<vault>/<item> reference",
+    typeof id === "string" && environmentIdPattern.test(id),
+    `${label} must be a 26-character 1Password Environment ID`,
   );
-  return { vault: match[1], item: match[2] };
-}
-function validateItemReference(reference, label) {
-  try {
-    parseItemReference(reference);
-  } catch {
-    throw new Error(`${label} must be an op://<vault>/<item> reference`);
-  }
-  return reference;
+  return id;
 }
 
 // scripts/policy.mjs
@@ -1506,19 +1495,23 @@ function validateDeploymentPolicy(policy) {
     for (const field of ["githubEnvironment", "url"]) {
       requireString(target[field], `deployment targets.${role}.${field}`);
     }
+    if (target.configurationItem !== void 0)
+      throw new Error(
+        `deployment targets.${role}.configurationItem was replaced by configurationEnvironment`,
+      );
     if (policy.configurationSource === "1password")
-      validateItemReference(
-        target.configurationItem,
-        `deployment targets.${role}.configurationItem`,
+      validateEnvironmentId(
+        target.configurationEnvironment,
+        `deployment targets.${role}.configurationEnvironment`,
       );
     else if (
-      target.configurationItem !== void 0 &&
-      target.configurationItem !== ""
+      target.configurationEnvironment !== void 0 &&
+      target.configurationEnvironment !== ""
     )
       throw new Error(
-        `deployment targets.${role}.configurationItem requires onePasswordTokenSecret`,
+        `deployment targets.${role}.configurationEnvironment requires onePasswordTokenSecret`,
       );
-    else target.configurationItem = "";
+    else target.configurationEnvironment = "";
     if (single) {
       if (target.wranglerEnv !== void 0) {
         throw new Error(
@@ -1806,18 +1799,22 @@ function validatePhalaPolicy(policy) {
       `Phala targets.${role}.githubEnvironment`,
     );
     requireString(target.cvmName, `Phala targets.${role}.cvmName`);
+    if (target.configurationItem !== void 0)
+      throw new Error(
+        `Phala targets.${role}.configurationItem was replaced by configurationEnvironment`,
+      );
     if (onePasswordToken) {
-      validateItemReference(
-        target.configurationItem,
-        `Phala targets.${role}.configurationItem`,
+      validateEnvironmentId(
+        target.configurationEnvironment,
+        `Phala targets.${role}.configurationEnvironment`,
       );
       if (target.configuration !== void 0)
         throw new Error(
-          `Phala targets.${role} takes its values from configurationItem, not a configuration bundle`,
+          `Phala targets.${role} takes its values from configurationEnvironment, not a configuration bundle`,
         );
-    } else if (target.configurationItem !== void 0)
+    } else if (target.configurationEnvironment !== void 0)
       throw new Error(
-        `Phala targets.${role}.configurationItem requires credentials.onePasswordTokenSecret`,
+        `Phala targets.${role}.configurationEnvironment requires credentials.onePasswordTokenSecret`,
       );
     if (target.setup !== void 0) validateInfrastructure(target.setup);
     validateTargetConfiguration(target, policy.runtimeVariables);

@@ -1,116 +1,89 @@
-// Runtime configuration read straight from a 1Password item, one custom field per
-// declared name: the field label is the environment name, a concealed field is a
-// secret and any other field type is a public value. The item is the readable,
-// reviewable source of truth; nothing is synchronized into GitHub first.
-
-// Vault and item names may contain spaces, never a slash, a control character
-// or surrounding whitespace.
-const segment = "[^/\\s](?:[^/\\t\\n\\r]*[^/\\s])?";
-const referencePattern = new RegExp(`^op://(${segment})/(${segment})$`);
+// One 1Password Environment supplies exactly the runtime names in the policy.
+const environmentIdPattern = /^[a-z2-7]{26}$/;
 const namePattern = /^[A-Z][A-Z0-9_]*$/;
 
 function check(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-/** `op://<vault>/<item>`: one whole item, never a single field reference. */
-export function parseItemReference(reference) {
-  const match =
-    typeof reference === "string" ? reference.match(referencePattern) : null;
+export function validateEnvironmentId(id, label) {
   check(
-    match,
-    "1Password configuration must be an op://<vault>/<item> reference",
+    typeof id === "string" && environmentIdPattern.test(id),
+    `${label} must be a 26-character 1Password Environment ID`,
   );
-  return { vault: match[1], item: match[2] };
+  return id;
 }
 
-/** Validate a policy-declared item reference and return it unchanged. */
-export function validateItemReference(reference, label) {
-  try {
-    parseItemReference(reference);
-  } catch {
-    throw new Error(`${label} must be an op://<vault>/<item> reference`);
-  }
-  return reference;
-}
-
-/**
- * Exactly the declared names, from the item's custom fields. Built-in fields
- * (username, password, notes) carry a purpose and are ignored. A missing,
- * mistyped, duplicated or undeclared field fails, naming fields, never values.
- */
-export function itemValues(item, { secrets, variables }) {
-  check(
-    item && typeof item === "object" && Array.isArray(item.fields),
-    "1Password configuration item is malformed",
-  );
-  const fields = new Map();
-  for (const field of item.fields) {
-    if (!field || field.purpose) continue;
-    const label = field.label;
+/** Validate names and concealment without printing any stored values. */
+export function environmentValues(entries, { secrets, variables }) {
+  check(Array.isArray(entries), "1Password Environment response is malformed");
+  const byName = new Map();
+  for (const entry of entries) {
     check(
-      typeof label === "string" && namePattern.test(label),
-      "1Password configuration fields must be labelled with uppercase environment names",
+      entry && typeof entry.name === "string" && namePattern.test(entry.name),
+      "1Password entries must use uppercase environment names",
     );
-    check(!fields.has(label), `1Password configuration lists ${label} twice`);
-    fields.set(label, field);
+    const { name } = entry;
+    check(!byName.has(name), `1Password Environment lists ${name} twice`);
+    byName.set(name, entry);
   }
   const declared = new Set([...secrets, ...variables]);
-  const undeclared = [...fields.keys()].filter((name) => !declared.has(name));
+  const undeclared = [...byName.keys()].filter((name) => !declared.has(name));
   check(
     undeclared.length === 0,
-    `1Password configuration has undeclared fields: ${undeclared.join(" ")}`,
+    `1Password Environment has undeclared entries: ${undeclared.join(" ")}`,
   );
-  const missing = [...declared].filter((name) => !fields.has(name));
+  const missing = [...declared].filter((name) => !byName.has(name));
   check(
     missing.length === 0,
-    `1Password configuration is missing fields: ${missing.join(" ")}`,
+    `1Password Environment is missing entries: ${missing.join(" ")}`,
   );
   const result = { vars: {}, secrets: {} };
   for (const name of secrets) {
-    const field = fields.get(name);
+    const { concealed, value } = byName.get(name);
     check(
-      field.type === "CONCEALED",
-      `1Password field ${name} must be concealed: it is a secret`,
+      concealed === true,
+      `1Password entry ${name} must be concealed: it is a secret`,
     );
     check(
-      typeof field.value === "string" && field.value.trim() !== "",
+      typeof value === "string" && value.trim() !== "",
       `1Password secret ${name} is empty`,
     );
-    result.secrets[name] = field.value;
+    result.secrets[name] = value;
   }
   for (const name of variables) {
-    const field = fields.get(name);
+    const { concealed, value } = byName.get(name);
     check(
-      field.type !== "CONCEALED",
-      `1Password field ${name} must not be concealed: it is a public value`,
+      concealed === false,
+      `1Password entry ${name} must not be concealed: it is a public value`,
     );
-    result.vars[name] = typeof field.value === "string" ? field.value : "";
+    check(
+      value === undefined || typeof value === "string",
+      `1Password public value ${name} is malformed`,
+    );
+    result.vars[name] = value ?? "";
   }
   return result;
 }
 
-/** Read one item through the 1Password CLI; `run` returns the CLI's stdout. */
-export async function loadItem(run, reference) {
-  const { vault, item } = parseItemReference(reference);
-  let parsed;
+/** Read the Environment through the pinned CLI without logging its output. */
+export async function loadEnvironment(run, id) {
+  validateEnvironmentId(id, "The 1Password configuration");
   try {
-    parsed = JSON.parse(
+    return JSON.parse(
       await run([
-        "item",
-        "get",
-        item,
-        "--vault",
-        vault,
+        "environment",
+        "secret",
+        "list",
+        id,
+        "--reveal",
         "--format",
         "json",
-        "--reveal",
       ]),
     );
   } catch {
-    throw new Error("Unable to read the 1Password configuration item");
+    throw new Error("Unable to read the 1Password Environment");
   }
-  return parsed;
 }
 
 /** Workflow-command masks for every secret value, line by line. */
@@ -118,5 +91,8 @@ export function maskCommands(values) {
   return Object.values(values.secrets)
     .flatMap((value) => value.split(/\r?\n/))
     .filter((line) => line.trim() !== "")
-    .map((line) => `::add-mask::${line}`);
+    .map(
+      (line) =>
+        `::add-mask::${line.replaceAll("%", "%25").replaceAll("\r", "%0D")}`,
+    );
 }

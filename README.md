@@ -133,42 +133,41 @@ Configs without `targetEnvironment` keep `--env`.
 ### Runtime configuration from 1Password
 
 Runtime configuration (Worker variables and secrets, Phala runtime secrets and
-variables) is read from **one 1Password item per target**, never from a JSON
-string. The item is the readable, reviewable source of truth; nothing is copied
-into GitHub first.
+variables) is read from **one 1Password Environment per target**, never from a JSON
+string. The Environment is the source of truth for runtime values.
 
-- **Item shape:** one custom field per declared name, labelled exactly with that
-  name. A **concealed** field is a secret; any other field type (text, URL) is a
-  public value. Built-in fields (username, password, notes) are ignored.
-- **Strict:** a missing, mistyped (secret not concealed, or the reverse),
-  duplicated or undeclared field fails the run before anything builds. Errors
-  name fields, never values, and every secret value is masked first.
+- **Environment shape:** one entry per declared name. Conceal secrets and show
+  public values.
+- **Strict:** a missing, duplicated or undeclared name, or a mismatched
+  concealment flag, fails the run before anything builds. Errors name entries,
+  never values. Validated secrets are masked before subsequent steps run.
 - **Policy:** name the GitHub secret holding a 1Password **service account**
-  token with read access to the item's vault, and give every target its item:
+  token with read access to that repository's Environments, and give each
+  target its 26-character Environment ID:
 
 ```jsonc
 // deployment-policy.jsonc
 {
-  "onePasswordTokenSecret": "OP_DEPLOY_SERVICE_ACCOUNT_TOKEN",
+  "onePasswordTokenSecret": "OP_ENVIRONMENT_TOKEN",
   "workerVariables": ["API_URL"],
   "workerSecrets": ["API_TOKEN"],
   "targets": {
-    "candidate": { "configurationItem": "op://Deploy Config/service staging" },
-    "release": { "configurationItem": "op://Deploy Config/service production" },
+    "candidate": { "configurationEnvironment": "6ijsqfxvdxlwjcpsx7yrzs3tka" },
+    "release": { "configurationEnvironment": "czahekt2sougvaklfeqwocb5si" },
   },
 }
 // phala-policy.jsonc: credentials.onePasswordTokenSecret, plus
-// targets.<role>.configurationItem; runtimeSecrets/runtimeVariables as before.
+// targets.<role>.configurationEnvironment; runtimeSecrets/runtimeVariables as before.
 ```
 
-The flows install a pinned 1Password CLI, read the item, and hand its values to
-the same materialization (Worker secrets file, generated Wrangler vars, Phala
+The flows install a pinned 1Password CLI, read the Environment, and hand its values
+to the same materialization (Worker secrets file, generated Wrangler vars, Phala
 sealed env) the other sources use. The private file is always removed.
 `onePasswordTokenSecret` and `environmentSecret` are mutually exclusive.
 
 **JSON bundles are legacy.** `environmentSecret` (one `{vars, secrets}` JSON
 string secret) and Phala `targets.<role>.configuration` keep working for
-existing callers until they move to an item; do not add new ones. Individual
+existing callers until they move to Environments; do not add new ones. Individual
 GitHub Environment secrets (`workerSecrets` with neither source) remain for
 repositories that have not moved yet.
 

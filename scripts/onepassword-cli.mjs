@@ -1,10 +1,14 @@
-// Load a target's runtime configuration from its 1Password item into a private
+// Load a target's runtime configuration from its 1Password Environment into a private
 // {vars, secrets} file for the shared deploy steps. Values never reach the log:
 // every secret is masked before anything else is printed, and errors name
-// fields only.
+// names only.
 import fs from "node:fs";
 import { spawnSync } from "node:child_process";
-import { itemValues, loadItem, maskCommands } from "./onepassword.mjs";
+import {
+  environmentValues,
+  loadEnvironment,
+  maskCommands,
+} from "./onepassword.mjs";
 
 try {
   const token = process.env.OP_SERVICE_ACCOUNT_TOKEN;
@@ -26,8 +30,11 @@ try {
     if (result.status !== 0) throw new Error("1Password CLI failed");
     return result.stdout;
   };
-  const item = await loadItem(run, process.env.CONFIGURATION_ITEM);
-  const values = itemValues(item, {
+  const entries = await loadEnvironment(
+    run,
+    process.env.CONFIGURATION_ENVIRONMENT,
+  );
+  const values = environmentValues(entries, {
     secrets: JSON.parse(process.env.SECRET_NAMES || "[]"),
     variables: JSON.parse(process.env.VARIABLE_NAMES || "[]"),
   });

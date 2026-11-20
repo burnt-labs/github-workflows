@@ -126,27 +126,27 @@ jobs:
           ref: 2f796adabe5f6035126668257b20a1edcfc3264f # unreleased
           path: .burnt-workflows
           persist-credentials: false
-      # A 1Password-sourced policy reads the target's item (one custom field per
+      # A 1Password-sourced policy reads the target's Environment (one entry per
       # declared name) into a private {vars, secrets} file that the steps below
       # consume exactly as they consume a bundle. Previews load it too, so a
-      # missing or mistyped field fails before anything is built.
+      # missing entry or mismatched concealment flag fails before anything is built.
       - name: Install 1Password CLI
         if: fromJSON(inputs.deployment-policy).configurationSource == '1password'
         uses: 1password/install-cli-action@1a3160d5e9de1ae0803eaa08a88746f5ae3daa50 # v4.1.0
         with:
-          version: 2.41.1
+          version: 2.42.0
       - name: Load runtime configuration from 1Password
         if: fromJSON(inputs.deployment-policy).configurationSource == '1password'
         working-directory: ${{ github.workspace }}
         env:
           OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets[fromJSON(inputs.deployment-policy).onePasswordTokenSecret] }}
-          CONFIGURATION_ITEM: ${{ fromJSON(inputs.deployment-policy).targets[inputs.target].configurationItem }}
+          CONFIGURATION_ENVIRONMENT: ${{ fromJSON(inputs.deployment-policy).targets[inputs.target].configurationEnvironment }}
           SECRET_NAMES: ${{ toJSON(fromJSON(inputs.deployment-policy).workerSecrets) }}
           VARIABLE_NAMES: ${{ toJSON(fromJSON(inputs.deployment-policy).workerVariables) }}
           OUTPUT_FILE: ${{ runner.temp }}/environment.json
         run: node .burnt-workflows/scripts/onepassword-cli.mjs
-      # A bundle always generates the target Wrangler config; a 1Password item
-      # does only when it supplies public vars, so a secrets-only item keeps the
+      # A bundle always generates the target Wrangler config; a 1Password Environment
+      # does only when it supplies public vars, so a secrets-only Environment keeps the
       # checked-in vars untouched.
       - name: Materialize public Worker variables
         if: >-

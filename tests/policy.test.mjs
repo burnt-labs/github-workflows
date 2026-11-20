@@ -157,7 +157,10 @@ test("deployment accepts the topology environments", () => {
       ...deploymentPolicy(topology),
       targets: Object.fromEntries(
         Object.entries(deploymentPolicy(topology).targets).map(
-          ([role, target]) => [role, { ...target, configurationItem: "" }],
+          ([role, target]) => [
+            role,
+            { ...target, configurationEnvironment: "" },
+          ],
         ),
       ),
       onePasswordTokenSecret: "",
@@ -538,26 +541,25 @@ test("Phala deploys a prebuilt image by its full repository", () => {
   assert.throws(() => validatePhalaPolicy(built), /image\.dockerfile/);
 });
 
-test("Phala runtime values can come from one 1Password item per target", () => {
+test("Phala runtime values can come from one 1Password Environment per target", () => {
   const onePassword = () => {
     const policy = phalaPolicy();
-    policy.credentials.onePasswordTokenSecret =
-      "OP_DEPLOY_SERVICE_ACCOUNT_TOKEN";
-    policy.targets.candidate.configurationItem =
-      "op://Deploy Config/service staging";
-    policy.targets.release.configurationItem =
-      "op://Deploy Config/service production";
+    policy.credentials.onePasswordTokenSecret = "OP_ENVIRONMENT_TOKEN";
+    policy.targets.candidate.configurationEnvironment =
+      "6ijsqfxvdxlwjcpsx7yrzs3tka";
+    policy.targets.release.configurationEnvironment =
+      "czahekt2sougvaklfeqwocb5si";
     return policy;
   };
   assert.deepEqual(validatePhalaPolicy(onePassword()), onePassword());
   for (const [mutate, pattern] of [
     [
-      (policy) => delete policy.targets.candidate.configurationItem,
-      /targets\.candidate\.configurationItem must be an op:\/\/<vault>\/<item>/,
+      (policy) => delete policy.targets.candidate.configurationEnvironment,
+      /targets\.candidate\.configurationEnvironment must be a 26-character 1Password Environment ID/,
     ],
     [
-      (policy) => (policy.targets.release.configurationItem = "staging"),
-      /targets\.release\.configurationItem must be/,
+      (policy) => (policy.targets.release.configurationEnvironment = "staging"),
+      /targets\.release\.configurationEnvironment must be/,
     ],
     [
       (policy) =>
@@ -569,7 +571,7 @@ test("Phala runtime values can come from one 1Password item per target", () => {
       /distinct uppercase secret name/,
     ],
     [
-      (policy) => policy.runtimeSecrets.push("OP_DEPLOY_SERVICE_ACCOUNT_TOKEN"),
+      (policy) => policy.runtimeSecrets.push("OP_ENVIRONMENT_TOKEN"),
       /reserved name/,
     ],
     [
@@ -578,7 +580,7 @@ test("Phala runtime values can come from one 1Password item per target", () => {
           secret: "SERVICE_CONFIG",
           runtimeValues: { LOG_LEVEL: { value: "info" } },
         }),
-      /takes its values from configurationItem, not a configuration bundle/,
+      /takes its values from configurationEnvironment, not a configuration bundle/,
     ],
   ]) {
     const policy = onePassword();
@@ -586,10 +588,10 @@ test("Phala runtime values can come from one 1Password item per target", () => {
     assert.throws(() => validatePhalaPolicy(policy), pattern);
   }
   const stray = phalaPolicy();
-  stray.targets.release.configurationItem = "op://deploy/service";
+  stray.targets.release.configurationEnvironment = "6ijsqfxvdxlwjcpsx7yrzs3tka";
   assert.throws(
     () => validatePhalaPolicy(stray),
-    /configurationItem requires credentials\.onePasswordTokenSecret/,
+    /configurationEnvironment requires credentials\.onePasswordTokenSecret/,
   );
 });
 
@@ -876,17 +878,17 @@ test("individual Worker secret policies retain their existing allowed names", ()
   assert.throws(() => validateDeploymentPolicy(policy), /control credential/);
 });
 
-test("runtime configuration can come from one 1Password item per target", () => {
+test("runtime configuration can come from one 1Password Environment per target", () => {
   const onePassword = () => {
     const policy = deploymentPolicy();
-    policy.onePasswordTokenSecret = "OP_DEPLOY_SERVICE_ACCOUNT_TOKEN";
+    policy.onePasswordTokenSecret = "OP_ENVIRONMENT_TOKEN";
     policy.workerVariables = ["API_URL"];
     policy.workerSecrets = ["API_TOKEN"];
     policy.verificationSecrets = ["API_TOKEN"];
-    policy.targets.candidate.configurationItem =
-      "op://Deploy Config/service staging";
-    policy.targets.release.configurationItem =
-      "op://Deploy Config/service production";
+    policy.targets.candidate.configurationEnvironment =
+      "6ijsqfxvdxlwjcpsx7yrzs3tka";
+    policy.targets.release.configurationEnvironment =
+      "czahekt2sougvaklfeqwocb5si";
     policy.targets.release.commands = { afterDeploy: "node verify.mjs" };
     policy.targets.candidate.commands = { afterDeploy: "node verify.mjs" };
     policy.targets.candidate.wranglerConfig =
@@ -898,8 +900,8 @@ test("runtime configuration can come from one 1Password item per target", () => 
   const validated = validateDeploymentPolicy(onePassword());
   assert.equal(validated.configurationSource, "1password");
   assert.equal(
-    validated.targets.release.configurationItem,
-    "op://Deploy Config/service production",
+    validated.targets.release.configurationEnvironment,
+    "czahekt2sougvaklfeqwocb5si",
   );
   // Normalization is idempotent.
   assert.deepEqual(
@@ -917,14 +919,14 @@ test("runtime configuration can come from one 1Password item per target", () => 
       /1Password workerVariables require targets\.release\.wranglerConfig/,
     ],
     [
-      (policy) => delete policy.targets.release.configurationItem,
-      /targets\.release\.configurationItem must be an op:\/\/<vault>\/<item>/,
+      (policy) => delete policy.targets.release.configurationEnvironment,
+      /targets\.release\.configurationEnvironment must be a 26-character 1Password Environment ID/,
     ],
     [
       (policy) =>
-        (policy.targets.candidate.configurationItem =
+        (policy.targets.candidate.configurationEnvironment =
           "op://vault/item/API_TOKEN"),
-      /targets\.candidate\.configurationItem must be/,
+      /targets\.candidate\.configurationEnvironment must be/,
     ],
     [
       (policy) => (policy.onePasswordTokenSecret = "op-token"),
@@ -935,7 +937,7 @@ test("runtime configuration can come from one 1Password item per target", () => 
       /onePasswordTokenSecret or environmentSecret, not both/,
     ],
     [
-      (policy) => policy.workerSecrets.push("OP_DEPLOY_SERVICE_ACCOUNT_TOKEN"),
+      (policy) => policy.workerSecrets.push("OP_ENVIRONMENT_TOKEN"),
       /must not name a control credential/,
     ],
     [
@@ -959,10 +961,11 @@ test("runtime configuration can come from one 1Password item per target", () => 
   );
 
   const stray = deploymentPolicy();
-  stray.targets.candidate.configurationItem = "op://deploy/service";
+  stray.targets.candidate.configurationEnvironment =
+    "6ijsqfxvdxlwjcpsx7yrzs3tka";
   assert.throws(
     () => validateDeploymentPolicy(stray),
-    /configurationItem requires onePasswordTokenSecret/,
+    /configurationEnvironment requires onePasswordTokenSecret/,
   );
   const variablesOnly = deploymentPolicy();
   variablesOnly.workerVariables = ["API_URL"];

@@ -1,180 +1,125 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  itemValues,
-  loadItem,
+  environmentValues,
+  loadEnvironment,
   maskCommands,
-  parseItemReference,
-  validateItemReference,
+  validateEnvironmentId,
 } from "../scripts/onepassword.mjs";
 
-const field = (label, value, type = "STRING", extra = {}) => ({
-  id: label.toLowerCase(),
-  label,
-  type,
+const id = "6ijsqfxvdxlwjcpsx7yrzs3tka";
+const entry = (name, value, concealed = false) => ({
+  name,
   value,
-  ...extra,
-});
-const item = (...fields) => ({
-  category: "SECURE_NOTE",
-  fields: [
-    field("notesPlain", "operator notes", "STRING", { purpose: "NOTES" }),
-    ...fields,
-  ],
+  concealed,
 });
 const names = { secrets: ["API_TOKEN"], variables: ["API_URL", "LOG_LEVEL"] };
+const complete = [
+  entry("API_TOKEN", "s3cret", true),
+  entry("API_URL", "https://api.example.test"),
+  entry("LOG_LEVEL", ""),
+];
 
-test("an item reference names one vault and one item", () => {
-  assert.deepEqual(parseItemReference("op://Deploy Config/cue-tee staging"), {
-    vault: "Deploy Config",
-    item: "cue-tee staging",
-  });
-  assert.deepEqual(parseItemReference("op://deploy/satya-verifier-staging"), {
-    vault: "deploy",
-    item: "satya-verifier-staging",
-  });
-  for (const reference of [
+test("policy requires a 26-character Environment ID", () => {
+  assert.equal(validateEnvironmentId(id, "label"), id);
+  for (const value of [
     undefined,
     "",
-    "deploy/item",
-    "op://deploy",
-    "op://deploy/item/API_TOKEN",
-    "op:///item",
-    "op://deploy/",
-    "op://de ploy\n/item",
-  ])
-    assert.throws(
-      () => parseItemReference(reference),
-      /op:\/\/<vault>\/<item>/,
-      String(reference),
-    );
-  assert.equal(
-    validateItemReference("op://deploy/item", "label"),
+    "staging",
     "op://deploy/item",
-  );
-  assert.throws(
-    () =>
-      validateItemReference(
-        "op://deploy/item/FIELD",
-        "targets.release.configurationItem",
-      ),
-    /targets\.release\.configurationItem must be an op:\/\/<vault>\/<item> reference/,
-  );
+    id.toUpperCase(),
+    `${id}a`,
+    `0${id.slice(1)}`,
+  ]) {
+    assert.throws(
+      () =>
+        validateEnvironmentId(
+          value,
+          "targets.release.configurationEnvironment",
+        ),
+      /targets\.release\.configurationEnvironment must be a 26-character 1Password Environment ID/,
+    );
+  }
 });
 
-test("declared names come from custom fields by type", () => {
+test("declared entries retain their exact values and concealment", () => {
+  assert.deepEqual(environmentValues(complete, names), {
+    secrets: { API_TOKEN: "s3cret" },
+    vars: { API_URL: "https://api.example.test", LOG_LEVEL: "" },
+  });
   assert.deepEqual(
-    itemValues(
-      item(
-        field("API_TOKEN", "s3cret", "CONCEALED"),
-        field("API_URL", "https://api.example.test", "URL"),
-        field("LOG_LEVEL", ""),
-      ),
-      names,
-    ),
-    {
-      secrets: { API_TOKEN: "s3cret" },
-      vars: { API_URL: "https://api.example.test", LOG_LEVEL: "" },
-    },
-  );
-  // Built-in fields carry a purpose and never count as configuration.
-  assert.deepEqual(
-    itemValues(
-      {
-        fields: [
-          field("username", "operator", "STRING", { purpose: "USERNAME" }),
-          field("password", "unused", "CONCEALED", { purpose: "PASSWORD" }),
-          field("API_TOKEN", "s3cret", "CONCEALED"),
-        ],
-      },
-      { secrets: ["API_TOKEN"], variables: [] },
-    ),
-    { secrets: { API_TOKEN: "s3cret" }, vars: {} },
-  );
-  // A field with no value is an empty public value.
-  assert.deepEqual(
-    itemValues(
-      { fields: [{ label: "LOG_LEVEL", type: "STRING" }] },
-      { secrets: [], variables: ["LOG_LEVEL"] },
-    ).vars,
+    environmentValues([{ name: "LOG_LEVEL", concealed: false }], {
+      secrets: [],
+      variables: ["LOG_LEVEL"],
+    }).vars,
     { LOG_LEVEL: "" },
   );
 });
 
-test("the item must match the declaration exactly and never echoes values", () => {
-  const complete = [
-    field("API_TOKEN", "s3cret", "CONCEALED"),
-    field("API_URL", "https://api.example.test"),
-    field("LOG_LEVEL", "info"),
-  ];
-  for (const [fields, pattern] of [
-    [complete.slice(1), /missing fields: API_TOKEN$/],
-    [[...complete, field("EXTRA", "x")], /undeclared fields: EXTRA$/],
-    [[...complete, field("API_URL", "again")], /lists API_URL twice/],
-    [[...complete, field("lower_case", "x")], /uppercase environment names/],
+test("malformed or mismatched entries fail without echoing values", () => {
+  for (const [entries, pattern] of [
+    [null, /response is malformed/],
+    [{}, /response is malformed/],
+    [[null], /uppercase environment names/],
+    [complete.slice(1), /missing entries: API_TOKEN$/],
+    [[...complete, entry("EXTRA", "x")], /undeclared entries: EXTRA$/],
+    [[...complete, entry("API_URL", "again")], /lists API_URL twice/],
+    [[...complete, entry("lower_case", "x")], /uppercase environment names/],
     [
-      [field("API_TOKEN", "s3cret"), ...complete.slice(1)],
+      [entry("API_TOKEN", "s3cret"), ...complete.slice(1)],
       /API_TOKEN must be concealed/,
     ],
     [
-      [complete[0], field("API_URL", "https://x", "CONCEALED"), complete[2]],
+      [complete[0], entry("API_URL", "s3cret", true), complete[2]],
       /API_URL must not be concealed/,
     ],
     [
-      [field("API_TOKEN", "  ", "CONCEALED"), ...complete.slice(1)],
+      [complete[0], { name: "API_URL", value: "s3cret" }, complete[2]],
+      /API_URL must not be concealed/,
+    ],
+    [[complete[0], entry("API_URL", 123), complete[2]], /API_URL is malformed/],
+    [
+      [entry("API_TOKEN", "  ", true), ...complete.slice(1)],
       /secret API_TOKEN is empty/,
     ],
   ]) {
     assert.throws(
-      () => itemValues(item(...fields), names),
+      () => environmentValues(entries, names),
       (error) => pattern.test(error.message) && !/s3cret/.test(error.message),
     );
   }
-  for (const broken of [null, {}, { fields: "x" }])
-    assert.throws(() => itemValues(broken, names), /malformed/);
-  assert.deepEqual(
-    itemValues({ fields: [null] }, { secrets: [], variables: [] }),
-    {
-      vars: {},
-      secrets: {},
-    },
-  );
+  assert.deepEqual(environmentValues([], { secrets: [], variables: [] }), {
+    vars: {},
+    secrets: {},
+  });
 });
 
-test("items are read whole through the CLI with values revealed", async () => {
+test("the CLI reads the Environment by ID with values revealed", async () => {
   const calls = [];
   const run = async (args) => {
     calls.push(args);
-    return JSON.stringify(item());
+    return JSON.stringify(complete);
   };
-  assert.deepEqual(
-    await loadItem(run, "op://Deploy Config/cue-tee staging"),
-    item(),
-  );
+  assert.deepEqual(await loadEnvironment(run, id), complete);
   assert.deepEqual(calls, [
-    [
-      "item",
-      "get",
-      "cue-tee staging",
-      "--vault",
-      "Deploy Config",
-      "--format",
-      "json",
-      "--reveal",
-    ],
+    ["environment", "secret", "list", id, "--reveal", "--format", "json"],
   ]);
   await assert.rejects(
-    loadItem(async () => "not json", "op://deploy/item"),
-    /Unable to read the 1Password configuration item/,
+    loadEnvironment(async () => "not json", id),
+    /Unable to read the 1Password Environment/,
   );
   await assert.rejects(
-    loadItem(async () => {
+    loadEnvironment(async () => {
       throw new Error("token s3cret rejected");
-    }, "op://deploy/item"),
+    }, id),
     (error) =>
       /Unable to read/.test(error.message) && !/s3cret/.test(error.message),
   );
-  await assert.rejects(loadItem(run, "deploy/item"), /op:\/\/<vault>\/<item>/);
+  await assert.rejects(
+    loadEnvironment(run, "staging"),
+    /26-character 1Password Environment ID/,
+  );
+  assert.equal(calls.length, 1);
 });
 
 test("every secret line is masked; public values are not", () => {
@@ -182,12 +127,12 @@ test("every secret line is masked; public values are not", () => {
     maskCommands({
       vars: { API_URL: "https://api.example.test" },
       secrets: {
-        API_TOKEN: "s3cret",
+        API_TOKEN: "s3cret%0A",
         PEM: "-----BEGIN-----\r\nabc\n\n-----END-----",
       },
     }),
     [
-      "::add-mask::s3cret",
+      "::add-mask::s3cret%250A",
       "::add-mask::-----BEGIN-----",
       "::add-mask::abc",
       "::add-mask::-----END-----",

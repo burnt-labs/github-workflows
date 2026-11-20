@@ -155,7 +155,7 @@ jobs:
             echo "image=ghcr.io/${repository}/${IMAGE_NAME}:${GITHUB_SHA}"
           } >> "$GITHUB_OUTPUT"
       # A policy naming credentials.onePasswordTokenSecret takes its runtime values
-      # from the target's 1Password item (one custom field per declared name),
+      # from the target's 1Password Environment (one entry per declared name),
       # never from the GitHub Environment.
       - name: Checkout central configuration tools
         if: fromJSON(needs.policy.outputs.phala).credentials.onePasswordTokenSecret != null
@@ -174,12 +174,12 @@ jobs:
         if: fromJSON(needs.policy.outputs.phala).credentials.onePasswordTokenSecret != null
         uses: 1password/install-cli-action@1a3160d5e9de1ae0803eaa08a88746f5ae3daa50 # v4.1.0
         with:
-          version: 2.41.1
+          version: 2.42.0
       - name: Load runtime configuration from 1Password
         if: fromJSON(needs.policy.outputs.phala).credentials.onePasswordTokenSecret != null
         env:
           OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets[fromJSON(needs.policy.outputs.phala).credentials.onePasswordTokenSecret] }}
-          CONFIGURATION_ITEM: ${{ fromJSON(needs.policy.outputs.phala).targets[inputs.target].configurationItem }}
+          CONFIGURATION_ENVIRONMENT: ${{ fromJSON(needs.policy.outputs.phala).targets[inputs.target].configurationEnvironment }}
           SECRET_NAMES: ${{ toJSON(fromJSON(needs.policy.outputs.phala).runtimeSecrets) }}
           VARIABLE_NAMES: ${{ toJSON(fromJSON(needs.policy.outputs.phala).runtimeVariables) }}
           OUTPUT_FILE: ${{ runner.temp }}/phala-runtime.json
@@ -558,12 +558,12 @@ jobs:
         if: fromJSON(needs.policy.outputs.phala).credentials.onePasswordTokenSecret != null
         uses: 1password/install-cli-action@1a3160d5e9de1ae0803eaa08a88746f5ae3daa50 # v4.1.0
         with:
-          version: 2.41.1
+          version: 2.42.0
       - name: Load runtime configuration from 1Password
         if: fromJSON(needs.policy.outputs.phala).credentials.onePasswordTokenSecret != null
         env:
           OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets[fromJSON(needs.policy.outputs.phala).credentials.onePasswordTokenSecret] }}
-          CONFIGURATION_ITEM: ${{ fromJSON(needs.policy.outputs.phala).targets[inputs.target].configurationItem }}
+          CONFIGURATION_ENVIRONMENT: ${{ fromJSON(needs.policy.outputs.phala).targets[inputs.target].configurationEnvironment }}
           SECRET_NAMES: ${{ toJSON(fromJSON(needs.policy.outputs.phala).runtimeSecrets) }}
           VARIABLE_NAMES: ${{ toJSON(fromJSON(needs.policy.outputs.phala).runtimeVariables) }}
           OUTPUT_FILE: ${{ runner.temp }}/phala-runtime.json

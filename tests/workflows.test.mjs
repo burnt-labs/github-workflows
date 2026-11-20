@@ -2004,7 +2004,7 @@ test("Phala deploys a prebuilt image only by an explicit, pullable digest", () =
     );
 });
 
-test("Cloudflare reads a 1Password item into the bundle path and always removes it", () => {
+test("Cloudflare reads a 1Password Environment into the bundle path and always removes it", () => {
   const workflow = parse(
     fs.readFileSync(`${directory}/cloudflare-version.yml`, "utf8"),
   );
@@ -2025,8 +2025,8 @@ test("Cloudflare reads a 1Password item into the bundle path and always removes 
     /secrets\[fromJSON\(inputs\.deployment-policy\)\.onePasswordTokenSecret\]/,
   );
   assert.match(
-    load.env.CONFIGURATION_ITEM,
-    /targets\[inputs\.target\]\.configurationItem/,
+    load.env.CONFIGURATION_ENVIRONMENT,
+    /targets\[inputs\.target\]\.configurationEnvironment/,
   );
   assert.match(load.env.SECRET_NAMES, /workerSecrets/);
   assert.match(load.env.VARIABLE_NAMES, /workerVariables/);
@@ -2068,7 +2068,7 @@ test("Cloudflare reads a 1Password item into the bundle path and always removes 
   );
 });
 
-test("Phala deploy and reseal read a 1Password item only when policy names its token", () => {
+test("Phala deploy and reseal read a 1Password Environment only when policy names its token", () => {
   const workflow = parse(
     fs.readFileSync(`${directory}/phala-deploy.yml`, "utf8"),
   );
@@ -2085,8 +2085,8 @@ test("Phala deploy and reseal read a 1Password item only when policy names its t
     assert.match(load.run, /onepassword-cli\.mjs"?$/);
     assert.match(load.env.OP_SERVICE_ACCOUNT_TOKEN, /onePasswordTokenSecret\]/);
     assert.match(
-      load.env.CONFIGURATION_ITEM,
-      /targets\[inputs\.target\]\.configurationItem/,
+      load.env.CONFIGURATION_ENVIRONMENT,
+      /targets\[inputs\.target\]\.configurationEnvironment/,
     );
     assert.match(load.env.SECRET_NAMES, /runtimeSecrets/);
     assert.match(load.env.VARIABLE_NAMES, /runtimeVariables/);

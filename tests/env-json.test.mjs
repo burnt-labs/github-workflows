@@ -316,11 +316,11 @@ test("bundled CLI materializes with no dependencies or secret logging", (t) => {
 test("a 1Password-sourced policy materializes from the loader's private file", (t) => {
   const options = fixture(t);
   delete options.policy.environmentSecret;
-  options.policy.onePasswordTokenSecret = "OP_DEPLOY_SERVICE_ACCOUNT_TOKEN";
-  options.policy.targets.candidate.configurationItem =
-    "op://deploy/service staging";
-  options.policy.targets.release.configurationItem =
-    "op://deploy/service production";
+  options.policy.onePasswordTokenSecret = "OP_ENVIRONMENT_TOKEN";
+  options.policy.targets.candidate.configurationEnvironment =
+    "6ijsqfxvdxlwjcpsx7yrzs3tka";
+  options.policy.targets.release.configurationEnvironment =
+    "czahekt2sougvaklfeqwocb5si";
   const file = path.join(options.runnerTemp, "environment.json");
   fs.writeFileSync(file, options.bundle, { mode: 0o600 });
   const run = (phase) =>

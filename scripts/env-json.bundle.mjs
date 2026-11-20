@@ -1107,27 +1107,16 @@ function validateBuildInputs({ buildVariables, buildAssets } = {}) {
 }
 
 // scripts/onepassword.mjs
-var segment = "[^/\\s](?:[^/\\t\\n\\r]*[^/\\s])?";
-var referencePattern = new RegExp(`^op://(${segment})/(${segment})$`);
+var environmentIdPattern = /^[a-z2-7]{26}$/;
 function check(condition, message) {
   if (!condition) throw new Error(message);
 }
-function parseItemReference(reference) {
-  const match =
-    typeof reference === "string" ? reference.match(referencePattern) : null;
+function validateEnvironmentId(id, label) {
   check(
-    match,
-    "1Password configuration must be an op://<vault>/<item> reference",
+    typeof id === "string" && environmentIdPattern.test(id),
+    `${label} must be a 26-character 1Password Environment ID`,
   );
-  return { vault: match[1], item: match[2] };
-}
-function validateItemReference(reference, label) {
-  try {
-    parseItemReference(reference);
-  } catch {
-    throw new Error(`${label} must be an op://<vault>/<item> reference`);
-  }
-  return reference;
+  return id;
 }
 
 // scripts/policy.mjs
@@ -1383,19 +1372,23 @@ function validateDeploymentPolicy(policy) {
     for (const field of ["githubEnvironment", "url"]) {
       requireString(target[field], `deployment targets.${role}.${field}`);
     }
+    if (target.configurationItem !== void 0)
+      throw new Error(
+        `deployment targets.${role}.configurationItem was replaced by configurationEnvironment`,
+      );
     if (policy.configurationSource === "1password")
-      validateItemReference(
-        target.configurationItem,
-        `deployment targets.${role}.configurationItem`,
+      validateEnvironmentId(
+        target.configurationEnvironment,
+        `deployment targets.${role}.configurationEnvironment`,
       );
     else if (
-      target.configurationItem !== void 0 &&
-      target.configurationItem !== ""
+      target.configurationEnvironment !== void 0 &&
+      target.configurationEnvironment !== ""
     )
       throw new Error(
-        `deployment targets.${role}.configurationItem requires onePasswordTokenSecret`,
+        `deployment targets.${role}.configurationEnvironment requires onePasswordTokenSecret`,
       );
-    else target.configurationItem = "";
+    else target.configurationEnvironment = "";
     if (single) {
       if (target.wranglerEnv !== void 0) {
         throw new Error(
