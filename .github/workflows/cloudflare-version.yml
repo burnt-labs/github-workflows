@@ -117,22 +117,42 @@ jobs:
         run: ${{ fromJSON(inputs.quality-policy).commands.install }}
       - name: Checkout central environment tools
         if: >-
-          fromJSON(inputs.deployment-policy).environmentSecret != '' ||
+          (fromJSON(inputs.deployment-policy).configurationSource == '1password' || fromJSON(inputs.deployment-policy).environmentSecret != '') ||
           fromJSON(inputs.deployment-policy).buildAssets != null ||
           fromJSON(inputs.deployment-policy).targets[inputs.target].buildVariables != null
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: burnt-labs/github-workflows
-          ref: 41373a846dad02cfec19503d781e89b3fbf81d69 # unreleased
+          ref: e7a34f4bc6ee1bd7ee8971079125e7aed7f9875a # unreleased
           path: .burnt-workflows
           persist-credentials: false
+      # A 1Password-sourced policy reads the target's item (one custom field per
+      # declared name) into a private {vars, secrets} file that the steps below
+      # consume exactly as they consume a bundle. Previews load it too, so a
+      # missing or mistyped field fails before anything is built.
+      - name: Install 1Password CLI
+        if: fromJSON(inputs.deployment-policy).configurationSource == '1password'
+        uses: 1password/install-cli-action@1a3160d5e9de1ae0803eaa08a88746f5ae3daa50 # v4.1.0
+        with:
+          version: 2.41.1
+      - name: Load runtime configuration from 1Password
+        if: fromJSON(inputs.deployment-policy).configurationSource == '1password'
+        working-directory: ${{ github.workspace }}
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets[fromJSON(inputs.deployment-policy).onePasswordTokenSecret] }}
+          CONFIGURATION_ITEM: ${{ fromJSON(inputs.deployment-policy).targets[inputs.target].configurationItem }}
+          SECRET_NAMES: ${{ toJSON(fromJSON(inputs.deployment-policy).workerSecrets) }}
+          VARIABLE_NAMES: ${{ toJSON(fromJSON(inputs.deployment-policy).workerVariables) }}
+          OUTPUT_FILE: ${{ runner.temp }}/environment.json
+        run: node .burnt-workflows/scripts/onepassword-cli.mjs
       - name: Materialize public Worker variables
-        if: fromJSON(inputs.deployment-policy).environmentSecret != ''
+        if: (fromJSON(inputs.deployment-policy).configurationSource == '1password' || fromJSON(inputs.deployment-policy).environmentSecret != '')
         working-directory: ${{ github.workspace }}
         env:
           DEPLOYMENT_POLICY: ${{ inputs.deployment-policy }}
           TARGET: ${{ inputs.target }}
           ENVIRONMENT_JSON: ${{ secrets[fromJSON(inputs.deployment-policy).environmentSecret] }}
+          ENVIRONMENT_JSON_FILE: ${{ runner.temp }}/environment.json
         run: node .burnt-workflows/scripts/env-json.bundle.mjs prepare
       - name: Prepare public frontend build inputs
         if: >-
@@ -299,7 +319,7 @@ jobs:
         if: >-
           inputs.operation == 'deploy' &&
           fromJSON(inputs.deployment-policy).workerSecrets[0] != null &&
-          fromJSON(inputs.deployment-policy).environmentSecret == ''
+          (fromJSON(inputs.deployment-policy).configurationSource != '1password' && fromJSON(inputs.deployment-policy).environmentSecret == '')
         env:
           # Everything the caller inherited, the Cloudflare token included, so
           # the allowlist below is the whole safety property. The validator also
@@ -320,7 +340,7 @@ jobs:
         id: bundle-secrets
         if: >-
           inputs.operation == 'deploy' &&
-          fromJSON(inputs.deployment-policy).environmentSecret != '' &&
+          (fromJSON(inputs.deployment-policy).configurationSource == '1password' || fromJSON(inputs.deployment-policy).environmentSecret != '') &&
           fromJSON(inputs.deployment-policy).workerSecrets[0] != null
         working-directory: ${{ github.workspace }}
         env:
@@ -328,6 +348,7 @@ jobs:
           TARGET: ${{ inputs.target }}
           OPERATION: ${{ inputs.operation }}
           ENVIRONMENT_JSON: ${{ secrets[fromJSON(inputs.deployment-policy).environmentSecret] }}
+          ENVIRONMENT_JSON_FILE: ${{ runner.temp }}/environment.json
         run: node .burnt-workflows/scripts/env-json.bundle.mjs secrets
       # D1 migrations declared in the deployment policy apply here, before the
       # new version deploys, so the schema the code was written against exists
@@ -432,6 +453,7 @@ jobs:
           TARGET: ${{ inputs.target }}
           OPERATION: ${{ inputs.operation }}
           ENVIRONMENT_JSON: ${{ secrets[fromJSON(inputs.deployment-policy).environmentSecret] }}
+          ENVIRONMENT_JSON_FILE: ${{ runner.temp }}/environment.json
         run: node .burnt-workflows/scripts/env-json.bundle.mjs verification
       - name: Verify deployment
         if: >-
@@ -451,6 +473,10 @@ jobs:
         if: always()
         working-directory: ${{ github.workspace }}
         run: rm -f "$RUNNER_TEMP/worker-verification-secrets.json"
+      - name: Remove 1Password runtime configuration
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: rm -f "$RUNNER_TEMP/environment.json"
       - name: Extract Cloudflare metadata
         id: metadata
         env:

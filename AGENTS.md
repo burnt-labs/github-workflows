@@ -101,6 +101,10 @@ migration status are in `.agents/plans/phala-single-flow.md`:
   outage.** Close the gap here and have the caller use it. A repository still on
   a bespoke flow is migration debt: move it onto the shared flow; never copy its
   bespoke pattern into another repository or reintroduce one that was removed.
+- **Runtime configuration comes from a 1Password item per target**, one
+  custom field per name ("Runtime configuration from 1Password"). Do not add
+  JSON-string bundles (`environmentSecret`, Phala `configuration`) or new
+  per-name GitHub secrets for runtime values; move callers to an item.
 - **Repo-shaped follow-ups** (acceptance checks, measurement pull requests,
   writing a URL into another service) stay in the consumer as downstream jobs
   fed by the flow's outputs. They never re-implement build, deploy or sealing.
@@ -587,7 +591,49 @@ secrets, because inherited secrets arrive under their own names. Both forms
 work: `cloudflare-version.yml` resolves `cloudflare-api-token` first and falls
 back to `BURNT_CLOUDFLARE_API_TOKEN`, and fails loudly if neither is present.
 
-### Service environment bundles
+### Runtime configuration from 1Password
+
+Runtime configuration (Worker variables and secrets, Phala runtime secrets and
+variables) is read from **one 1Password item per target**, never from a JSON
+string. The item is the readable, reviewable source of truth; nothing is copied
+into GitHub first.
+
+- **Item shape:** one custom field per declared name, labelled exactly with that
+  name. A **concealed** field is a secret; any other field type (text, URL) is a
+  public value. Built-in fields (username, password, notes) are ignored.
+- **Strict:** a missing, mistyped (secret not concealed, or the reverse),
+  duplicated or undeclared field fails the run before anything builds. Errors
+  name fields, never values, and every secret value is masked first.
+- **Policy:** name the GitHub secret holding a 1Password **service account**
+  token with read access to the item's vault, and give every target its item:
+
+```jsonc
+// deployment-policy.jsonc
+{
+  "onePasswordTokenSecret": "OP_DEPLOY_SERVICE_ACCOUNT_TOKEN",
+  "workerVariables": ["API_URL"],
+  "workerSecrets": ["API_TOKEN"],
+  "targets": {
+    "candidate": { "configurationItem": "op://Deploy Config/service staging" },
+    "release": { "configurationItem": "op://Deploy Config/service production" },
+  },
+}
+// phala-policy.jsonc: credentials.onePasswordTokenSecret, plus
+// targets.<role>.configurationItem; runtimeSecrets/runtimeVariables as before.
+```
+
+The flows install a pinned 1Password CLI, read the item, and hand its values to
+the same materialization (Worker secrets file, generated Wrangler vars, Phala
+sealed env) the other sources use. The private file is always removed.
+`onePasswordTokenSecret` and `environmentSecret` are mutually exclusive.
+
+**JSON bundles are legacy.** `environmentSecret` (one `{vars, secrets}` JSON
+string secret) and Phala `targets.<role>.configuration` keep working for
+existing callers until they move to an item; do not add new ones. Individual
+GitHub Environment secrets (`workerSecrets` with neither source) remain for
+repositories that have not moved yet.
+
+### Service environment bundles (legacy)
 
 A Cloudflare policy may select `environmentSecret`, naming a GitHub Environment
 secret containing exactly `{vars,secrets}`. `workerVariables` and `workerSecrets`
