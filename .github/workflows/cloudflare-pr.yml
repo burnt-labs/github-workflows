@@ -52,16 +52,18 @@ jobs:
           echo "version-tag=${RELEASE_PREFIX}pr-${PR_NUMBER}-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
   preview-candidate:
-    # Run quality for 1Password consumers without giving PR code a
-    # deployment job or access to runtime credentials.
+    # Broker credentials follow the target's GitHub Environment access policy.
+    # The legacy service account path remains unavailable to PR previews.
     if: >-
-      fromJSON(needs.quality.outputs.deployment-policy).configurationSource != '1password' &&
+      (fromJSON(needs.quality.outputs.deployment-policy).configurationSource != '1password' ||
+       fromJSON(needs.quality.outputs.deployment-policy).onePasswordBroker == true) &&
       (github.event_name != 'pull_request' ||
        github.event.pull_request.user.login != 'dependabot[bot]')
     needs: [quality, metadata]
     permissions:
       contents: read
       deployments: write
+      id-token: write
     uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@284808eeacdd16a20050e65949ea44416cded682 # unreleased
     with:
       operation: preview

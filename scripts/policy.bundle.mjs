@@ -1459,25 +1459,42 @@ function validateDeploymentPolicy(policy) {
     throw new Error(
       "deployment onePasswordTokenSecret must be an uppercase secret name",
     );
+  if (policy.onePasswordBroker !== void 0 && policy.onePasswordBroker !== true)
+    throw new Error("deployment onePasswordBroker must be true when selected");
+  if (
+    policy.onePasswordBroker &&
+    (policy.environmentSecret || policy.onePasswordTokenSecret)
+  )
+    throw new Error(
+      "deployment selects either 1Password Broker, a service account token, or a bundle",
+    );
   if (policy.onePasswordTokenSecret && policy.environmentSecret)
     throw new Error(
       "deployment runtime configuration comes from onePasswordTokenSecret or environmentSecret, not both",
     );
   if (
-    policy.onePasswordTokenSecret &&
+    (policy.onePasswordTokenSecret || policy.onePasswordBroker) &&
     [...policy.workerVariables, ...policy.workerSecrets].some(
       (name) =>
-        controlNames.has(name) || name === policy.onePasswordTokenSecret,
+        controlNames.has(name) ||
+        name === policy.onePasswordTokenSecret ||
+        (policy.onePasswordBroker &&
+          [
+            "OP_INTEGRATION_KEY",
+            "OP_WORKLOAD_ID",
+            "OP_NETWORK_WORKLOAD_ID",
+          ].includes(name)),
     )
   )
     throw new Error(
       "deployment runtime configuration must not name a control credential",
     );
-  policy.configurationSource = policy.onePasswordTokenSecret
-    ? "1password"
-    : policy.environmentSecret
-      ? "bundle"
-      : "github";
+  policy.configurationSource =
+    policy.onePasswordTokenSecret || policy.onePasswordBroker
+      ? "1password"
+      : policy.environmentSecret
+        ? "bundle"
+        : "github";
   if (policy.configurationSource === "github" && policy.workerVariables.length)
     throw new Error(
       "deployment workerVariables requires onePasswordTokenSecret or environmentSecret",

@@ -1174,3 +1174,36 @@ test("Phala broker is an explicit configuration source and rejects mixed credent
     /onePasswordBroker must be true/,
   );
 });
+
+test("Cloudflare Broker accepts network-only targets and reserves its credentials", () => {
+  const policy = deploymentPolicy();
+  policy.onePasswordBroker = true;
+  policy.workerVariables = ["CHAIN_ID"];
+  for (const target of Object.values(policy.targets)) {
+    target.wranglerConfig = ".wrangler.generated.jsonc";
+    target.networkConfiguration = {
+      environment: "6ijsqfxvdxlwjcpsx7yrzs3tka",
+      variables: { CHAIN_ID: "XION_CHAIN_ID" },
+    };
+  }
+  assert.equal(
+    validateDeploymentPolicy(structuredClone(policy)).configurationSource,
+    "1password",
+  );
+  assert.throws(
+    () =>
+      validateDeploymentPolicy({
+        ...policy,
+        onePasswordTokenSecret: "OP_ENVIRONMENT_TOKEN",
+      }),
+    /selects either/,
+  );
+  assert.throws(
+    () =>
+      validateDeploymentPolicy({
+        ...policy,
+        workerSecrets: ["OP_INTEGRATION_KEY"],
+      }),
+    /control credential/,
+  );
+});

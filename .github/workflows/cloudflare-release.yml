@@ -98,6 +98,7 @@ jobs:
     permissions:
       contents: read
       deployments: write
+      id-token: write
     uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@284808eeacdd16a20050e65949ea44416cded682 # unreleased
     with:
       operation: preview
@@ -118,6 +119,7 @@ jobs:
     permissions:
       contents: read
       deployments: write
+      id-token: write
     uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@284808eeacdd16a20050e65949ea44416cded682 # unreleased
     with:
       operation: deploy

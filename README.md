@@ -178,24 +178,27 @@ key or a mapped runtime name fail validation. A network-only target can omit
 `configurationEnvironment` when all its runtime values are mapped public
 variables. For Cloudflare, a network mapping preserves unrelated Wrangler
 vars and rejects any managed variable also defined in the selected source
-Wrangler config. Cloudflare pull requests run quality without uploading a
-Worker preview when the policy uses 1Password.
+Wrangler config. When using the 1Password CLI source, Cloudflare pull requests
+run quality and skip the Worker preview upload.
 
-Phala policies can select GitHub workload identity with
-`credentials.onePasswordBroker: true` and grant `id-token: write` in the
-caller. Store the integration key as `OP_INTEGRATION_KEY` in the GitHub
-organization and limit its repository visibility to the repositories using it.
-Each protected GitHub Environment defines `OP_WORKLOAD_ID` for its app binding
+Cloudflare and Phala policies can select GitHub workload identity with
+`credentials.onePasswordBroker: true`. Reusable Cloudflare callers grant
+`id-token: write` in the calling job. Phala callers grant this permission
+when using workload identity. Pass the organization secret `OP_INTEGRATION_KEY`
+with `secrets: inherit` and limit its repository visibility to the repositories
+using it. Each GitHub Environment defines `OP_WORKLOAD_ID` for its app binding
 and `OP_NETWORK_WORKLOAD_ID` if it reads a shared network Environment. The IDs
-are GitHub variables. The deployment step exchanges its short-lived GitHub
-identity with 1Password and validates concealment before materializing values.
+are GitHub variables. The job exchanges its short-lived GitHub identity with
+1Password and validates concealment before materializing values. Cloudflare
+Broker previews use the existing GitHub Environment configured for the preview
+target.
 
 Phala repositories declare only the roles they run. A request for an omitted
 role fails during policy validation, before deploy or reseal.
 
-The flows install a pinned 1Password CLI, read the Environment, and hand its values
-to the same materialization (Worker secrets file, generated Wrangler vars, Phala
-sealed env) the other sources use. The private file is always removed.
+The workflows use a pinned 1Password SDK for workload identity or a pinned
+1Password CLI for the service-account source. Both use the same materialization
+for Worker secrets, generated Wrangler vars, and the Phala sealed env. The private file is always removed.
 `onePasswordTokenSecret` and `environmentSecret` are mutually exclusive.
 
 **JSON bundles are legacy.** `environmentSecret` (one `{vars, secrets}` JSON

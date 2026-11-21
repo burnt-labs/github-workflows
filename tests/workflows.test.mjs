@@ -2018,7 +2018,7 @@ test("Cloudflare reads a 1Password Environment into the bundle path and always r
   for (const step of [install, load])
     assert.equal(
       step.if,
-      "fromJSON(inputs.deployment-policy).configurationSource == '1password'",
+      "fromJSON(inputs.deployment-policy).configurationSource == '1password' && fromJSON(inputs.deployment-policy).onePasswordBroker != true",
     );
   assert.match(install.uses, /^1password\/install-cli-action@[0-9a-f]{40}$/);
   assert.match(install.with.version, /^\d+\.\d+\.\d+$/);
@@ -2153,7 +2153,7 @@ test("Phala deploy and reseal read a 1Password Environment only when policy name
   );
 });
 
-test("Cloudflare pull requests skip environment-bound jobs for 1Password consumers", () => {
+test("Cloudflare PR previews support workload identity and keep legacy tokens out", () => {
   const pr = parse(fs.readFileSync(`${directory}/cloudflare-pr.yml`, "utf8"));
   const version = parse(
     fs.readFileSync(`${directory}/cloudflare-version.yml`, "utf8"),
@@ -2165,6 +2165,19 @@ test("Cloudflare pull requests skip environment-bound jobs for 1Password consume
   assert.match(version.jobs.version.if, /configurationSource != '1password'/);
   assert.match(version.jobs.version.if, /pull_request","pull_request_target/);
   assert.equal(pr.jobs.quality.environment, undefined);
+  assert.match(pr.jobs["preview-candidate"].if, /onePasswordBroker == true/);
+  assert.match(version.jobs.version.if, /onePasswordBroker == true/);
+  assert.equal(pr.jobs["preview-candidate"].permissions["id-token"], "write");
+  assert.equal(version.jobs.version.permissions["id-token"], "write");
+  const broker = version.jobs.version.steps.find(
+    (step) => step.name === "Load runtime configuration from 1Password Broker",
+  );
+  assert.equal(
+    broker.env.OP_INTEGRATION_KEY,
+    "${{ secrets.OP_INTEGRATION_KEY }}",
+  );
+  assert.equal(broker.env.OP_WORKLOAD_ID, "${{ vars.OP_WORKLOAD_ID }}");
+  assert.equal(broker.env.OUTPUT_FILE, "${{ runner.temp }}/environment.json");
 });
 
 test("Phala requests workload identity only through the pinned deploy and reseal jobs", () => {
