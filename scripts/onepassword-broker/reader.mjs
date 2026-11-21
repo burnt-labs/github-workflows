@@ -1,5 +1,10 @@
 import fs from "node:fs";
-import { loadConfiguration, maskCommands } from "../onepassword.mjs";
+import {
+  loadConfiguration,
+  maskCommands,
+  selectWorkflowVariables,
+  validateEnvironmentId,
+} from "../onepassword.mjs";
 
 async function oidcToken(audience, env) {
   const url = new URL(env.ACTIONS_ID_TOKEN_REQUEST_URL);
@@ -18,13 +23,47 @@ async function oidcToken(audience, env) {
   return value;
 }
 
+async function readBrokerEntries(
+  env,
+  id,
+  createClient,
+  fetchIdentity,
+  { network = false } = {},
+) {
+  const key = env.OP_INTEGRATION_KEY?.replace(/=+$/, "");
+  if (!key) throw new Error("OP_INTEGRATION_KEY is missing");
+  const workloadUuid = network
+    ? env.OP_NETWORK_WORKLOAD_ID
+    : env.OP_WORKLOAD_ID;
+  if (!workloadUuid)
+    throw new Error(
+      network
+        ? "OP_NETWORK_WORKLOAD_ID is missing"
+        : "OP_WORKLOAD_ID is missing",
+    );
+  try {
+    const client = await createClient({
+      integrationName: "Burnt GitHub Workflows",
+      integrationVersion: "1.0.0",
+      oidcFetcher: (audience) => fetchIdentity(audience, env),
+      workloadDetails: { workloadUuid, customerManagedSecret: key },
+    });
+    const { variables } = await client.environments.getVariables(id);
+    return variables.map(({ name, value, masked }) => ({
+      name,
+      concealed: masked,
+      value: network && masked ? undefined : value,
+    }));
+  } catch {
+    throw new Error("1Password Broker could not read the assigned Environment");
+  }
+}
+
 export async function readBrokerConfiguration(
   env,
   createClient,
   fetchIdentity,
 ) {
-  const key = env.OP_INTEGRATION_KEY?.replace(/=+$/, "");
-  if (!key) throw new Error("OP_INTEGRATION_KEY is missing");
   const target = {
     configurationEnvironment: env.CONFIGURATION_ENVIRONMENT || undefined,
     networkConfiguration:
@@ -33,38 +72,29 @@ export async function readBrokerConfiguration(
   const names = {
     secrets: JSON.parse(env.SECRET_NAMES || "[]"),
     variables: JSON.parse(env.VARIABLE_NAMES || "[]"),
+    workflowVariables: JSON.parse(env.WORKFLOW_VARIABLE_NAMES || "[]"),
   };
-  async function read(id) {
-    const network = id === target.networkConfiguration?.environment;
-    const workloadUuid = network
-      ? env.OP_NETWORK_WORKLOAD_ID
-      : env.OP_WORKLOAD_ID;
-    if (!workloadUuid)
-      throw new Error(
-        network
-          ? "OP_NETWORK_WORKLOAD_ID is missing"
-          : "OP_WORKLOAD_ID is missing",
-      );
-    try {
-      const client = await createClient({
-        integrationName: "Burnt GitHub Workflows",
-        integrationVersion: "1.0.0",
-        oidcFetcher: (audience) => fetchIdentity(audience, env),
-        workloadDetails: { workloadUuid, customerManagedSecret: key },
-      });
-      const { variables } = await client.environments.getVariables(id);
-      return variables.map(({ name, value, masked }) => ({
-        name,
-        concealed: masked,
-        value: network && masked ? undefined : value,
-      }));
-    } catch {
-      throw new Error(
-        "1Password Broker could not read the assigned Environment",
-      );
-    }
-  }
-  return loadConfiguration(undefined, target, names, read);
+  return loadConfiguration(undefined, target, names, (id) =>
+    readBrokerEntries(env, id, createClient, fetchIdentity, {
+      network: id === target.networkConfiguration?.environment,
+    }),
+  );
+}
+
+export async function readBrokerWorkflowVariables(
+  env,
+  createClient,
+  fetchIdentity = oidcToken,
+) {
+  const id = validateEnvironmentId(
+    env.CONFIGURATION_ENVIRONMENT,
+    "The 1Password workflow configuration",
+  );
+  const entries = await readBrokerEntries(env, id, createClient, fetchIdentity);
+  return selectWorkflowVariables(
+    entries,
+    JSON.parse(env.WORKFLOW_VARIABLE_NAMES || "[]"),
+  );
 }
 
 export async function writeBrokerConfiguration(env) {

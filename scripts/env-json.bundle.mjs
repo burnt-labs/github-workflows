@@ -1146,6 +1146,7 @@ function validateConfigurationSources(target, names, label) {
   );
   const appNames = [
     ...names.secrets,
+    ...(names.workflowVariables || []),
     ...names.variables.filter((name) => !Object.hasOwn(variables, name)),
   ];
   for (const [name, key] of Object.entries(variables)) {

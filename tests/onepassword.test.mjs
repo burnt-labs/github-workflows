@@ -5,6 +5,7 @@ import {
   loadEnvironment,
   loadConfiguration,
   maskCommands,
+  selectWorkflowVariables,
   validateEnvironmentId,
 } from "../scripts/onepassword.mjs";
 
@@ -314,5 +315,97 @@ test("Broker authenticates separately for app and network and preserves the SDK'
     (error) =>
       /Broker could not read/.test(error.message) &&
       !error.message.includes("hidden credential"),
+  );
+});
+
+test("Phala validates declared workflow values without sealing them into the CVM", () => {
+  const workflowVariables = ["APP_PUBLIC_URL"];
+  const entries = [
+    ...complete,
+    entry("APP_PUBLIC_URL", "https://app.example.test"),
+  ];
+  assert.deepEqual(
+    environmentValues(entries, { ...names, workflowVariables }),
+    environmentValues(complete, names),
+  );
+  assert.throws(
+    () => environmentValues(complete, { ...names, workflowVariables }),
+    /missing entries: APP_PUBLIC_URL/,
+  );
+  for (const value of [
+    entry("APP_PUBLIC_URL", "wrong", true),
+    entry("APP_PUBLIC_URL", ""),
+  ]) {
+    assert.throws(
+      () =>
+        environmentValues([...complete, value], {
+          ...names,
+          workflowVariables,
+        }),
+      /workflow variable APP_PUBLIC_URL/,
+    );
+  }
+});
+
+test("public workflow selection releases only the requested non-concealed values", () => {
+  assert.deepEqual(selectWorkflowVariables(complete, ["API_URL"]), {
+    API_URL: "https://api.example.test",
+  });
+  assert.throws(
+    () => selectWorkflowVariables(complete, ["API_TOKEN"]),
+    /must be public/,
+  );
+  assert.throws(
+    () => selectWorkflowVariables(complete, ["LOG_LEVEL"]),
+    /empty or malformed/,
+  );
+  assert.throws(
+    () => selectWorkflowVariables(complete, ["ABSENT"]),
+    /missing entry ABSENT/,
+  );
+  assert.throws(
+    () => selectWorkflowVariables(complete, ["API_URL", "API_URL"]),
+    /unique uppercase names/,
+  );
+});
+
+test("workflow Broker reader restricts the result to the requested public input", async () => {
+  const { readBrokerWorkflowVariables } =
+    await import("../scripts/onepassword-broker/reader.mjs");
+  const env = {
+    OP_INTEGRATION_KEY: "example",
+    OP_WORKLOAD_ID: "app-workload",
+    CONFIGURATION_ENVIRONMENT: id,
+    WORKFLOW_VARIABLE_NAMES: '["API_URL"]',
+  };
+  const createClient = async ({ workloadDetails }) => {
+    assert.equal(workloadDetails.workloadUuid, "app-workload");
+    return {
+      environments: {
+        async getVariables(environmentId) {
+          assert.equal(environmentId, id);
+          return {
+            variables: complete.map(({ name, value, concealed }) => ({
+              name,
+              value,
+              masked: concealed,
+            })),
+          };
+        },
+      },
+    };
+  };
+  const fetchIdentity = async () => "synthetic-identity";
+  assert.deepEqual(
+    await readBrokerWorkflowVariables(env, createClient, fetchIdentity),
+    { API_URL: "https://api.example.test" },
+  );
+  await assert.rejects(
+    readBrokerWorkflowVariables(
+      { ...env, WORKFLOW_VARIABLE_NAMES: '["API_TOKEN"]' },
+      createClient,
+      fetchIdentity,
+    ),
+    /must be public/,
   );
 });

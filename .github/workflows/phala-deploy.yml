@@ -192,6 +192,7 @@ jobs:
           NETWORK_CONFIGURATION: ${{ toJSON(fromJSON(needs.policy.outputs.phala).targets[inputs.target].networkConfiguration) }}
           SECRET_NAMES: ${{ toJSON(fromJSON(needs.policy.outputs.phala).runtimeSecrets) }}
           VARIABLE_NAMES: ${{ toJSON(fromJSON(needs.policy.outputs.phala).runtimeVariables) }}
+          WORKFLOW_VARIABLE_NAMES: ${{ toJSON(fromJSON(needs.policy.outputs.phala).workflowVariables || fromJSON('[]')) }}
           OUTPUT_FILE: ${{ runner.temp }}/phala-runtime.json
         run: node "$RUNNER_TEMP/burnt-config-tools/scripts/onepassword-cli.mjs"
       - name: Install 1Password Broker SDK
@@ -207,6 +208,7 @@ jobs:
           NETWORK_CONFIGURATION: ${{ toJSON(fromJSON(needs.policy.outputs.phala).targets[inputs.target].networkConfiguration) }}
           SECRET_NAMES: ${{ toJSON(fromJSON(needs.policy.outputs.phala).runtimeSecrets) }}
           VARIABLE_NAMES: ${{ toJSON(fromJSON(needs.policy.outputs.phala).runtimeVariables) }}
+          WORKFLOW_VARIABLE_NAMES: ${{ toJSON(fromJSON(needs.policy.outputs.phala).workflowVariables || fromJSON('[]')) }}
           OUTPUT_FILE: ${{ runner.temp }}/phala-runtime.json
         run: node "$RUNNER_TEMP/burnt-config-tools/scripts/onepassword-broker/cli.mjs"
       - name: Collect deployment credentials and runtime configuration
@@ -598,6 +600,7 @@ jobs:
           NETWORK_CONFIGURATION: ${{ toJSON(fromJSON(needs.policy.outputs.phala).targets[inputs.target].networkConfiguration) }}
           SECRET_NAMES: ${{ toJSON(fromJSON(needs.policy.outputs.phala).runtimeSecrets) }}
           VARIABLE_NAMES: ${{ toJSON(fromJSON(needs.policy.outputs.phala).runtimeVariables) }}
+          WORKFLOW_VARIABLE_NAMES: ${{ toJSON(fromJSON(needs.policy.outputs.phala).workflowVariables || fromJSON('[]')) }}
           OUTPUT_FILE: ${{ runner.temp }}/phala-runtime.json
         run: node .burnt-phala-tools/scripts/onepassword-cli.mjs
       - name: Install 1Password Broker SDK
@@ -613,6 +616,7 @@ jobs:
           NETWORK_CONFIGURATION: ${{ toJSON(fromJSON(needs.policy.outputs.phala).targets[inputs.target].networkConfiguration) }}
           SECRET_NAMES: ${{ toJSON(fromJSON(needs.policy.outputs.phala).runtimeSecrets) }}
           VARIABLE_NAMES: ${{ toJSON(fromJSON(needs.policy.outputs.phala).runtimeVariables) }}
+          WORKFLOW_VARIABLE_NAMES: ${{ toJSON(fromJSON(needs.policy.outputs.phala).workflowVariables || fromJSON('[]')) }}
           OUTPUT_FILE: ${{ runner.temp }}/phala-runtime.json
         run: node "$RUNNER_TEMP/burnt-phala-tools/scripts/onepassword-broker/cli.mjs"
       - name: Reseal and restart the CVM

@@ -38,6 +38,9 @@ try {
     {
       secrets: JSON.parse(process.env.SECRET_NAMES || "[]"),
       variables: JSON.parse(process.env.VARIABLE_NAMES || "[]"),
+      workflowVariables: JSON.parse(
+        process.env.WORKFLOW_VARIABLE_NAMES || "[]",
+      ),
     },
   );
   for (const command of maskCommands(values))

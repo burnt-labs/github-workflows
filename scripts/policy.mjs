@@ -761,6 +761,14 @@ export function validatePhalaPolicy(policy) {
     }
   }
 
+  const workflowVariableNames = validateEnvironmentNames(
+    policy.workflowVariables === undefined ? [] : policy.workflowVariables,
+    "Phala workflowVariables",
+    [...reserved, ...secretNames, ...variableNames],
+  );
+  if (workflowVariableNames.size && !(onePasswordToken || broker))
+    throw new Error("Phala workflowVariables requires 1Password");
+
   const targets = policy.targets;
   if (!targets || typeof targets !== "object" || Array.isArray(targets))
     throw new Error("Phala targets must declare candidate, release, or both");
@@ -787,7 +795,11 @@ export function validatePhalaPolicy(policy) {
     if (onePasswordToken || broker) {
       validateConfigurationSources(
         target,
-        { secrets: policy.runtimeSecrets, variables: policy.runtimeVariables },
+        {
+          secrets: policy.runtimeSecrets,
+          variables: policy.runtimeVariables,
+          workflowVariables: policy.workflowVariables,
+        },
         `Phala targets.${role}`,
       );
       if (target.configuration !== undefined)

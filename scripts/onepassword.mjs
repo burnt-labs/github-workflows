@@ -41,6 +41,7 @@ export function validateConfigurationSources(target, names, label) {
   );
   const appNames = [
     ...names.secrets,
+    ...(names.workflowVariables || []),
     ...names.variables.filter((name) => !Object.hasOwn(variables, name)),
   ];
   for (const [name, key] of Object.entries(variables)) {
@@ -84,10 +85,44 @@ function indexEntries(entries) {
   return byName;
 }
 
+function readPublicValues(byName, names) {
+  return Object.fromEntries(
+    names.map((name) => {
+      const entry = byName.get(name);
+      check(entry, `1Password Environment is missing entry ${name}`);
+      check(
+        entry.concealed === false,
+        `1Password workflow variable ${name} must be public`,
+      );
+      check(
+        typeof entry.value === "string" && entry.value.trim() !== "",
+        `1Password workflow variable ${name} is empty or malformed`,
+      );
+      return [name, entry.value];
+    }),
+  );
+}
+
+export function selectWorkflowVariables(entries, names) {
+  check(
+    Array.isArray(names) &&
+      names.length > 0 &&
+      names.every(
+        (name) => typeof name === "string" && namePattern.test(name),
+      ) &&
+      new Set(names).size === names.length,
+    "Workflow variable names must be unique uppercase names",
+  );
+  return readPublicValues(indexEntries(entries), names);
+}
+
 /** Validate names and concealment without printing any stored values. */
-export function environmentValues(entries, { secrets, variables }) {
+export function environmentValues(
+  entries,
+  { secrets, variables, workflowVariables = [] },
+) {
   const byName = indexEntries(entries);
-  const declared = new Set([...secrets, ...variables]);
+  const declared = new Set([...secrets, ...variables, ...workflowVariables]);
   const undeclared = [...byName.keys()].filter((name) => !declared.has(name));
   check(
     undeclared.length === 0,
@@ -98,6 +133,7 @@ export function environmentValues(entries, { secrets, variables }) {
     missing.length === 0,
     `1Password Environment is missing entries: ${missing.join(" ")}`,
   );
+  readPublicValues(byName, workflowVariables);
   const result = { vars: {}, secrets: {} };
   for (const name of secrets) {
     const { concealed, value } = byName.get(name);
@@ -162,6 +198,7 @@ export async function loadConfiguration(
   const mappings = networkConfiguration.variables;
   const appNames = {
     secrets: names.secrets,
+    workflowVariables: names.workflowVariables,
     variables: names.variables.filter((name) => !Object.hasOwn(mappings, name)),
   };
   const ignored = new Set([

@@ -1197,6 +1197,7 @@ function validateConfigurationSources(target, names, label) {
   );
   const appNames = [
     ...names.secrets,
+    ...(names.workflowVariables || []),
     ...names.variables.filter((name) => !Object.hasOwn(variables, name)),
   ];
   for (const [name, key] of Object.entries(variables)) {
@@ -1875,6 +1876,13 @@ function validatePhalaPolicy(policy) {
       );
     }
   }
+  const workflowVariableNames = validateEnvironmentNames(
+    policy.workflowVariables === void 0 ? [] : policy.workflowVariables,
+    "Phala workflowVariables",
+    [...reserved, ...secretNames, ...variableNames],
+  );
+  if (workflowVariableNames.size && !(onePasswordToken || broker))
+    throw new Error("Phala workflowVariables requires 1Password");
   const targets = policy.targets;
   if (!targets || typeof targets !== "object" || Array.isArray(targets))
     throw new Error("Phala targets must declare candidate, release, or both");
@@ -1901,7 +1909,11 @@ function validatePhalaPolicy(policy) {
     if (onePasswordToken || broker) {
       validateConfigurationSources(
         target,
-        { secrets: policy.runtimeSecrets, variables: policy.runtimeVariables },
+        {
+          secrets: policy.runtimeSecrets,
+          variables: policy.runtimeVariables,
+          workflowVariables: policy.workflowVariables,
+        },
         `Phala targets.${role}`,
       );
       if (target.configuration !== void 0)
