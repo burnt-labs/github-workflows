@@ -130,7 +130,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: burnt-labs/github-workflows
-          ref: 9f4761022fd9d3e44b63b0419cb1c44596473649 # unreleased
+          ref: 06e65c9dd595066202f84be5a3d29cb6de3e272c # unreleased
           path: .burnt-workflows
           persist-credentials: false
       # The loader resolves the selected target's runtime values into the
