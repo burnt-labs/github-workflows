@@ -133,42 +133,77 @@ Configs without `targetEnvironment` keep `--env`.
 ### Runtime configuration from 1Password
 
 Runtime configuration (Worker variables and secrets, Phala runtime secrets and
-variables) is read from **one 1Password item per target**, never from a JSON
-string. The item is the readable, reviewable source of truth; nothing is copied
-into GitHub first.
+variables) is read from **one 1Password Environment per target**, never from a JSON
+string. The Environment is the source of truth for runtime values.
 
-- **Item shape:** one custom field per declared name, labelled exactly with that
-  name. A **concealed** field is a secret; any other field type (text, URL) is a
-  public value. Built-in fields (username, password, notes) are ignored.
-- **Strict:** a missing, mistyped (secret not concealed, or the reverse),
-  duplicated or undeclared field fails the run before anything builds. Errors
-  name fields, never values, and every secret value is masked first.
+- **Environment shape:** one entry per declared name. Conceal secrets and show
+  public values.
+- **Strict:** a missing, duplicated or undeclared name, or a mismatched
+  concealment flag, fails the run before anything builds. Errors name entries,
+  never values. Validated secrets are masked before subsequent steps run.
 - **Policy:** name the GitHub secret holding a 1Password **service account**
-  token with read access to the item's vault, and give every target its item:
+  token in each target's GitHub Environment. Grant the token read access to
+  the 1Password Environments that target uses. Give each target its app
+  Environment ID, if it has app-specific values:
 
 ```jsonc
 // deployment-policy.jsonc
 {
-  "onePasswordTokenSecret": "OP_DEPLOY_SERVICE_ACCOUNT_TOKEN",
+  "onePasswordTokenSecret": "OP_ENVIRONMENT_TOKEN",
   "workerVariables": ["API_URL"],
   "workerSecrets": ["API_TOKEN"],
   "targets": {
-    "candidate": { "configurationItem": "op://Deploy Config/service staging" },
-    "release": { "configurationItem": "op://Deploy Config/service production" },
+    "candidate": { "configurationEnvironment": "6ijsqfxvdxlwjcpsx7yrzs3tka" },
+    "release": { "configurationEnvironment": "czahekt2sougvaklfeqwocb5si" },
   },
 }
 // phala-policy.jsonc: credentials.onePasswordTokenSecret, plus
-// targets.<role>.configurationItem; runtimeSecrets/runtimeVariables as before.
+// targets.<role>.configurationEnvironment; runtimeSecrets/runtimeVariables as before.
 ```
 
-The flows install a pinned 1Password CLI, read the item, and hand its values to
-the same materialization (Worker secrets file, generated Wrangler vars, Phala
-sealed env) the other sources use. The private file is always removed.
+Use `targets.<role>.networkConfiguration` to select public values from a
+separate network Environment. Each key in `variables` is a declared
+`workerVariables` or `runtimeVariables` name. Its value is the corresponding
+1Password key:
+
+```jsonc
+"networkConfiguration": {
+  "environment": "6ijsqfxvdxlwjcpsx7yrzs3tka",
+  "variables": { "CODE_ID": "XION_ABSTRACT_ACCOUNT_CODE_ID" },
+}
+```
+
+The two Environments must be distinct. App entries that duplicate a network
+key or a mapped runtime name fail validation. A network-only target can omit
+`configurationEnvironment` when all its runtime values are mapped public
+variables. For Cloudflare, a network mapping preserves unrelated Wrangler
+vars and rejects any managed variable also defined in the selected source
+Wrangler config. When using the 1Password CLI source, Cloudflare pull requests
+run quality and skip the Worker preview upload.
+
+Cloudflare and Phala policies can select GitHub workload identity with
+`credentials.onePasswordBroker: true`. Reusable Cloudflare callers grant
+`id-token: write` in the calling job. Phala callers grant this permission
+when using workload identity. Pass the organization secret `OP_INTEGRATION_KEY`
+with `secrets: inherit` and limit its repository visibility to the repositories
+using it. Each GitHub Environment defines `OP_WORKLOAD_ID` for its app binding
+and `OP_NETWORK_WORKLOAD_ID` if it reads a shared network Environment. The IDs
+are GitHub variables. The job exchanges its short-lived GitHub identity with
+1Password and validates concealment before materializing values. Cloudflare
+Broker previews use the existing GitHub Environment configured for the preview
+target.
+
+Phala repositories declare only the roles they run. A request for an omitted
+role fails during policy validation, before deploy or reseal.
+
+The workflows use a pinned 1Password SDK for workload identity or a pinned
+1Password CLI for the service-account source. Both use the same materialization
+for Worker secrets, generated Wrangler vars, and the Phala sealed env. The private file is always removed.
 `onePasswordTokenSecret` and `environmentSecret` are mutually exclusive.
 
 **JSON bundles are legacy.** `environmentSecret` (one `{vars, secrets}` JSON
 string secret) and Phala `targets.<role>.configuration` keep working for
-existing callers until they move to an item; do not add new ones. Individual
+existing callers until they move to Environments; do not add new ones. Individual
 GitHub Environment secrets (`workerSecrets` with neither source) remain for
 repositories that have not moved yet.
 

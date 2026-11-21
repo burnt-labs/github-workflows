@@ -1,0 +1,34 @@
+name: Read 1Password workflow variables
+description: Load selected public workflow variables using the GitHub workload identity.
+inputs:
+  environment-id:
+    description: 1Password Environment ID
+    required: true
+  workload-id:
+    description: 1Password workload ID
+    required: true
+  integration-key:
+    description: Existing organization integration key
+    required: true
+  names:
+    description: JSON array of public keys requested by this step
+    required: true
+outputs:
+  configuration:
+    description: JSON mapping of the requested public keys
+    value: ${{ steps.read.outputs.configuration }}
+runs:
+  using: composite
+  steps:
+    - name: Install 1Password SDK
+      shell: bash
+      run: npm ci --prefix "$GITHUB_ACTION_PATH/../../../scripts/onepassword-broker" --ignore-scripts --no-audit --no-fund
+    - name: Read public workflow configuration
+      id: read
+      shell: bash
+      env:
+        OP_INTEGRATION_KEY: ${{ inputs.integration-key }}
+        OP_WORKLOAD_ID: ${{ inputs.workload-id }}
+        CONFIGURATION_ENVIRONMENT: ${{ inputs.environment-id }}
+        WORKFLOW_VARIABLE_NAMES: ${{ inputs.names }}
+      run: node "$GITHUB_ACTION_PATH/../../../scripts/onepassword-broker/workflow-vars.mjs"

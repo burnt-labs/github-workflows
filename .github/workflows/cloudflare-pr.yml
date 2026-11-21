@@ -31,7 +31,7 @@ jobs:
       github.event_name != 'pull_request' ||
       (github.event.pull_request.draft == false &&
        github.event.pull_request.head.repo.full_name == github.repository)
-    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@b1a476b2f2f8906e17d2d5fa7309fd7d0fc6fd30 # unreleased
+    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@c2bbad47c02658329a80c9113bebcc50fd3f7ee7 # unreleased
     with:
       quality-policy-path: ${{ inputs.quality-policy-path }}
       deployment-policy-path: ${{ inputs.deployment-policy-path }}
@@ -52,17 +52,19 @@ jobs:
           echo "version-tag=${RELEASE_PREFIX}pr-${PR_NUMBER}-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
   preview-candidate:
-    # Dependabot pull requests cannot receive Actions secrets. Quality still
-    # runs above, but a deployment preview must not be attempted without the
-    # Cloudflare credentials.
+    # Broker credentials follow the target's GitHub Environment access policy.
+    # The legacy service account path remains unavailable to PR previews.
     if: >-
-      github.event_name != 'pull_request' ||
-      github.event.pull_request.user.login != 'dependabot[bot]'
+      (fromJSON(needs.quality.outputs.deployment-policy).configurationSource != '1password' ||
+       fromJSON(needs.quality.outputs.deployment-policy).onePasswordBroker == true) &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.user.login != 'dependabot[bot]')
     needs: [quality, metadata]
     permissions:
       contents: read
       deployments: write
-    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@b1a476b2f2f8906e17d2d5fa7309fd7d0fc6fd30 # unreleased
+      id-token: write
+    uses: burnt-labs/github-workflows/.github/workflows/cloudflare-version.yml@c2bbad47c02658329a80c9113bebcc50fd3f7ee7 # unreleased
     with:
       operation: preview
       target: candidate

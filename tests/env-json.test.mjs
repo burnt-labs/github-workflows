@@ -316,11 +316,11 @@ test("bundled CLI materializes with no dependencies or secret logging", (t) => {
 test("a 1Password-sourced policy materializes from the loader's private file", (t) => {
   const options = fixture(t);
   delete options.policy.environmentSecret;
-  options.policy.onePasswordTokenSecret = "OP_DEPLOY_SERVICE_ACCOUNT_TOKEN";
-  options.policy.targets.candidate.configurationItem =
-    "op://deploy/service staging";
-  options.policy.targets.release.configurationItem =
-    "op://deploy/service production";
+  options.policy.onePasswordTokenSecret = "OP_ENVIRONMENT_TOKEN";
+  options.policy.targets.candidate.configurationEnvironment =
+    "6ijsqfxvdxlwjcpsx7yrzs3tka";
+  options.policy.targets.release.configurationEnvironment =
+    "czahekt2sougvaklfeqwocb5si";
   const file = path.join(options.runnerTemp, "environment.json");
   fs.writeFileSync(file, options.bundle, { mode: 0o600 });
   const run = (phase) =>
@@ -629,4 +629,38 @@ test("workflow scoped probe receives only its file and cleanup runs after probe 
     assert.equal(execute("Remove verification secrets file").status, 0);
     assert.equal(fs.existsSync(output), false);
   }
+});
+
+test("shared Worker values preserve other Wrangler vars and reject a second definition", (t) => {
+  const options = fixture(t);
+  delete options.policy.environmentSecret;
+  options.policy.onePasswordTokenSecret = "OP_ENVIRONMENT_TOKEN";
+  options.policy.workerSecrets = [];
+  options.policy.workerVariables = ["API_URL"];
+  options.bundle = JSON.stringify({
+    vars: { API_URL: "https://api.example.test" },
+    secrets: {},
+  });
+  for (const target of Object.values(options.policy.targets))
+    target.networkConfiguration = {
+      environment: "6ijsqfxvdxlwjcpsx7yrzs3tka",
+      variables: { API_URL: "XION_RPC_URL" },
+    };
+
+  const generated = materializePublicConfiguration(options);
+  assert.deepEqual(
+    JSON.parse(fs.readFileSync(generated, "utf8")).env.staging.vars,
+    {
+      ...options.config.env.staging.vars,
+      API_URL: "https://api.example.test",
+    },
+  );
+  fs.rmSync(generated);
+  options.config.env.staging.vars.API_URL = "duplicate-definition";
+  fs.writeFileSync(options.source, JSON.stringify(options.config));
+  assert.throws(
+    () => materializePublicConfiguration(options),
+    /Source Wrangler vars already define 1Password key API_URL/,
+  );
+  assert.equal(fs.existsSync(generated), false);
 });

@@ -124,8 +124,23 @@ export function materializePublicConfiguration(options) {
     throw new Error(
       "Source Wrangler configuration does not contain the selected environment",
     );
-  // Complete replacement prevents stale source vars from winning over GitHub.
-  scope.vars = values.vars;
+  if (selected.networkConfiguration) {
+    // Network adoption can start with a subset of public vars. Each managed
+    // key has exactly one source. Keep other, unmanaged Wrangler variables.
+    const existing = scope.vars ?? {};
+    if (!object(existing))
+      throw new Error("Source Wrangler vars must be an object");
+    for (const name of Object.keys(values.vars)) {
+      if (Object.hasOwn(existing, name))
+        throw new Error(
+          `Source Wrangler vars already define 1Password key ${name}`,
+        );
+    }
+    scope.vars = { ...existing, ...values.vars };
+  } else {
+    // A complete bundle is the sole source for the selected scope.
+    scope.vars = values.vars;
+  }
   fs.writeFileSync(files.generated, `${JSON.stringify(config, null, 2)}\n`, {
     flag: "wx",
   });

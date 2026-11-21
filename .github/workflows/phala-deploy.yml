@@ -17,6 +17,9 @@ on:
         required: false
         default: ""
         type: string
+    secrets:
+      OP_INTEGRATION_KEY:
+        required: false
     outputs:
       app-id:
         description: Exact app identity for explicit setup/update acceptance
@@ -71,17 +74,23 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: burnt-labs/github-workflows
-          ref: 2f796adabe5f6035126668257b20a1edcfc3264f # unreleased
+          ref: 041437680ab350a7bf39b5b15ac6d15115c22310 # unreleased
           path: .burnt-workflows
       - id: policy
         name: Require and validate Phala policy
         run: node .burnt-workflows/scripts/policy.bundle.mjs --phala
 
+      - name: Require the selected target in policy
+        if: fromJSON(steps.policy.outputs.phala).targets[inputs.target] == null
+        run: |
+          echo "::error::The selected Phala target is not configured"
+          exit 1
+
   quality:
     needs: policy
     # A reseal builds nothing, so there is no consumer code to gate.
     if: inputs.operation != 'reseal'
-    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@b1a476b2f2f8906e17d2d5fa7309fd7d0fc6fd30 # unreleased
+    uses: burnt-labs/github-workflows/.github/workflows/required-quality.yml@0e6ff6a03cd7bcfe1f99ed9c242add330bf5ef82 # unreleased
 
   deploy:
     name: Phala ${{ inputs.target }}
@@ -98,6 +107,7 @@ jobs:
       contents: read
       deployments: write
       packages: write
+      id-token: write
     outputs:
       deployment-url: ${{ steps.phala-url.outputs.deployment-url }}
       compose-hash: ${{ steps.platform.outputs.compose-hash }}
@@ -154,19 +164,18 @@ jobs:
             echo "repository=ghcr.io/${repository}/${IMAGE_NAME}"
             echo "image=ghcr.io/${repository}/${IMAGE_NAME}:${GITHUB_SHA}"
           } >> "$GITHUB_OUTPUT"
-      # A policy naming credentials.onePasswordTokenSecret takes its runtime values
-      # from the target's 1Password item (one custom field per declared name),
-      # never from the GitHub Environment.
+      # 1Password authenticates using the policy's explicit method and
+      # resolves the target's runtime configuration before packaging.
       - name: Checkout central configuration tools
-        if: fromJSON(needs.policy.outputs.phala).credentials.onePasswordTokenSecret != null
+        if: fromJSON(needs.policy.outputs.phala).credentials.onePasswordTokenSecret != null || fromJSON(needs.policy.outputs.phala).credentials.onePasswordBroker == true
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: burnt-labs/github-workflows
-          ref: 2f796adabe5f6035126668257b20a1edcfc3264f # unreleased
+          ref: 041437680ab350a7bf39b5b15ac6d15115c22310 # unreleased
           path: .burnt-config-tools
           persist-credentials: false
       - name: Move configuration tooling outside the image build context
-        if: fromJSON(needs.policy.outputs.phala).credentials.onePasswordTokenSecret != null
+        if: fromJSON(needs.policy.outputs.phala).credentials.onePasswordTokenSecret != null || fromJSON(needs.policy.outputs.phala).credentials.onePasswordBroker == true
         run: |
           test ! -e "$RUNNER_TEMP/burnt-config-tools"
           mv .burnt-config-tools "$RUNNER_TEMP/burnt-config-tools"
@@ -174,16 +183,34 @@ jobs:
         if: fromJSON(needs.policy.outputs.phala).credentials.onePasswordTokenSecret != null
         uses: 1password/install-cli-action@1a3160d5e9de1ae0803eaa08a88746f5ae3daa50 # v4.1.0
         with:
-          version: 2.41.1
+          version: 2.42.0
       - name: Load runtime configuration from 1Password
         if: fromJSON(needs.policy.outputs.phala).credentials.onePasswordTokenSecret != null
         env:
           OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets[fromJSON(needs.policy.outputs.phala).credentials.onePasswordTokenSecret] }}
-          CONFIGURATION_ITEM: ${{ fromJSON(needs.policy.outputs.phala).targets[inputs.target].configurationItem }}
+          CONFIGURATION_ENVIRONMENT: ${{ fromJSON(needs.policy.outputs.phala).targets[inputs.target].configurationEnvironment }}
+          NETWORK_CONFIGURATION: ${{ toJSON(fromJSON(needs.policy.outputs.phala).targets[inputs.target].networkConfiguration) }}
           SECRET_NAMES: ${{ toJSON(fromJSON(needs.policy.outputs.phala).runtimeSecrets) }}
           VARIABLE_NAMES: ${{ toJSON(fromJSON(needs.policy.outputs.phala).runtimeVariables) }}
+          WORKFLOW_VARIABLE_NAMES: ${{ toJSON(fromJSON(needs.policy.outputs.phala).workflowVariables || fromJSON('[]')) }}
           OUTPUT_FILE: ${{ runner.temp }}/phala-runtime.json
         run: node "$RUNNER_TEMP/burnt-config-tools/scripts/onepassword-cli.mjs"
+      - name: Install 1Password Broker SDK
+        if: fromJSON(needs.policy.outputs.phala).credentials.onePasswordBroker == true
+        run: npm ci --prefix "$RUNNER_TEMP/burnt-config-tools/scripts/onepassword-broker" --ignore-scripts --no-audit --no-fund
+      - name: Load runtime configuration from 1Password Broker
+        if: fromJSON(needs.policy.outputs.phala).credentials.onePasswordBroker == true
+        env:
+          OP_INTEGRATION_KEY: ${{ secrets.OP_INTEGRATION_KEY }}
+          OP_WORKLOAD_ID: ${{ vars.OP_WORKLOAD_ID }}
+          OP_NETWORK_WORKLOAD_ID: ${{ vars.OP_NETWORK_WORKLOAD_ID }}
+          CONFIGURATION_ENVIRONMENT: ${{ fromJSON(needs.policy.outputs.phala).targets[inputs.target].configurationEnvironment }}
+          NETWORK_CONFIGURATION: ${{ toJSON(fromJSON(needs.policy.outputs.phala).targets[inputs.target].networkConfiguration) }}
+          SECRET_NAMES: ${{ toJSON(fromJSON(needs.policy.outputs.phala).runtimeSecrets) }}
+          VARIABLE_NAMES: ${{ toJSON(fromJSON(needs.policy.outputs.phala).runtimeVariables) }}
+          WORKFLOW_VARIABLE_NAMES: ${{ toJSON(fromJSON(needs.policy.outputs.phala).workflowVariables || fromJSON('[]')) }}
+          OUTPUT_FILE: ${{ runner.temp }}/phala-runtime.json
+        run: node "$RUNNER_TEMP/burnt-config-tools/scripts/onepassword-broker/cli.mjs"
       - name: Collect deployment credentials and runtime configuration
         env:
           ALL_SECRETS: ${{ toJSON(secrets) }}
@@ -196,6 +223,7 @@ jobs:
           TARGET_CONFIGURATION: ${{ toJSON(fromJSON(needs.policy.outputs.phala).targets[inputs.target]) }}
           RUNTIME_VARIABLES: ${{ toJSON(fromJSON(needs.policy.outputs.phala).runtimeVariables) }}
           PHALA_OPERATION: ${{ inputs.operation }}
+          EXPECT_ONEPASSWORD: ${{ fromJSON(needs.policy.outputs.phala).credentials.onePasswordBroker == true || fromJSON(needs.policy.outputs.phala).credentials.onePasswordTokenSecret != null }}
         run: |
           node --input-type=module - <<'NODE'
           import fs from "node:fs";
@@ -206,6 +234,8 @@ jobs:
           const target = JSON.parse(process.env.TARGET_CONFIGURATION);
           // 1Password-sourced runtime values replace the GitHub Environment's.
           const itemFile = `${process.env.RUNNER_TEMP}/phala-runtime.json`;
+          if (process.env.EXPECT_ONEPASSWORD === "true" && !fs.existsSync(itemFile))
+            throw new Error("The 1Password runtime configuration was not loaded");
           if (fs.existsSync(itemFile)) {
             const loaded = JSON.parse(fs.readFileSync(itemFile, "utf8"));
             fs.rmSync(itemFile, { force: true });
@@ -273,7 +303,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: burnt-labs/github-workflows
-          ref: 2f796adabe5f6035126668257b20a1edcfc3264f # unreleased
+          ref: ce0f2df3252ba169e71e794855e7bf1facf2ffe7 # unreleased
           path: .burnt-registry-tools
           persist-credentials: false
       # The CVM pulls a prebuilt image with the sealed registry login, so prove
@@ -539,6 +569,9 @@ jobs:
     concurrency:
       group: phala-${{ github.repository }}-${{ fromJSON(needs.policy.outputs.phala).targets[inputs.target].cvmName }}
       cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
     outputs:
       app-id: ${{ steps.reseal.outputs.app-id }}
       deployment-url: ${{ steps.reseal.outputs.deployment-url }}
@@ -551,23 +584,41 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: burnt-labs/github-workflows
-          ref: 2f796adabe5f6035126668257b20a1edcfc3264f # unreleased
+          ref: 041437680ab350a7bf39b5b15ac6d15115c22310 # unreleased
           path: .burnt-phala-tools
           persist-credentials: false
       - name: Install 1Password CLI
         if: fromJSON(needs.policy.outputs.phala).credentials.onePasswordTokenSecret != null
         uses: 1password/install-cli-action@1a3160d5e9de1ae0803eaa08a88746f5ae3daa50 # v4.1.0
         with:
-          version: 2.41.1
+          version: 2.42.0
       - name: Load runtime configuration from 1Password
         if: fromJSON(needs.policy.outputs.phala).credentials.onePasswordTokenSecret != null
         env:
           OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets[fromJSON(needs.policy.outputs.phala).credentials.onePasswordTokenSecret] }}
-          CONFIGURATION_ITEM: ${{ fromJSON(needs.policy.outputs.phala).targets[inputs.target].configurationItem }}
+          CONFIGURATION_ENVIRONMENT: ${{ fromJSON(needs.policy.outputs.phala).targets[inputs.target].configurationEnvironment }}
+          NETWORK_CONFIGURATION: ${{ toJSON(fromJSON(needs.policy.outputs.phala).targets[inputs.target].networkConfiguration) }}
           SECRET_NAMES: ${{ toJSON(fromJSON(needs.policy.outputs.phala).runtimeSecrets) }}
           VARIABLE_NAMES: ${{ toJSON(fromJSON(needs.policy.outputs.phala).runtimeVariables) }}
+          WORKFLOW_VARIABLE_NAMES: ${{ toJSON(fromJSON(needs.policy.outputs.phala).workflowVariables || fromJSON('[]')) }}
           OUTPUT_FILE: ${{ runner.temp }}/phala-runtime.json
         run: node .burnt-phala-tools/scripts/onepassword-cli.mjs
+      - name: Install 1Password Broker SDK
+        if: fromJSON(needs.policy.outputs.phala).credentials.onePasswordBroker == true
+        run: npm ci --prefix "$RUNNER_TEMP/burnt-phala-tools/scripts/onepassword-broker" --ignore-scripts --no-audit --no-fund
+      - name: Load runtime configuration from 1Password Broker
+        if: fromJSON(needs.policy.outputs.phala).credentials.onePasswordBroker == true
+        env:
+          OP_INTEGRATION_KEY: ${{ secrets.OP_INTEGRATION_KEY }}
+          OP_WORKLOAD_ID: ${{ vars.OP_WORKLOAD_ID }}
+          OP_NETWORK_WORKLOAD_ID: ${{ vars.OP_NETWORK_WORKLOAD_ID }}
+          CONFIGURATION_ENVIRONMENT: ${{ fromJSON(needs.policy.outputs.phala).targets[inputs.target].configurationEnvironment }}
+          NETWORK_CONFIGURATION: ${{ toJSON(fromJSON(needs.policy.outputs.phala).targets[inputs.target].networkConfiguration) }}
+          SECRET_NAMES: ${{ toJSON(fromJSON(needs.policy.outputs.phala).runtimeSecrets) }}
+          VARIABLE_NAMES: ${{ toJSON(fromJSON(needs.policy.outputs.phala).runtimeVariables) }}
+          WORKFLOW_VARIABLE_NAMES: ${{ toJSON(fromJSON(needs.policy.outputs.phala).workflowVariables || fromJSON('[]')) }}
+          OUTPUT_FILE: ${{ runner.temp }}/phala-runtime.json
+        run: node "$RUNNER_TEMP/burnt-phala-tools/scripts/onepassword-broker/cli.mjs"
       - name: Reseal and restart the CVM
         id: reseal
         env:

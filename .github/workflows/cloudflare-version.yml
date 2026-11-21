@@ -38,6 +38,8 @@ on:
         required: false
       BURNT_CLOUDFLARE_API_TOKEN:
         required: false
+      OP_INTEGRATION_KEY:
+        required: false
     outputs:
       version-id:
         value: ${{ jobs.version.outputs.version-id }}
@@ -53,6 +55,10 @@ permissions:
 
 jobs:
   version:
+    if: >-
+      fromJSON(inputs.deployment-policy).configurationSource != '1password' ||
+      fromJSON(inputs.deployment-policy).onePasswordBroker == true ||
+      !contains(fromJSON('["pull_request","pull_request_target"]'), github.event_name)
     name: ${{ inputs.target }} ${{ inputs.operation }}
     runs-on: ${{ fromJSON(inputs.deployment-policy).containers && 'ubicloud-standard-8' || 'ubicloud-standard-4' }}
     concurrency:
@@ -64,6 +70,7 @@ jobs:
     permissions:
       contents: read
       deployments: write
+      id-token: write
     outputs:
       version-id: ${{ steps.metadata.outputs.version-id }}
       deployment-url: ${{ steps.metadata.outputs.deployment-url }}
@@ -123,30 +130,46 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: burnt-labs/github-workflows
-          ref: 2f796adabe5f6035126668257b20a1edcfc3264f # unreleased
+          ref: 06e65c9dd595066202f84be5a3d29cb6de3e272c # unreleased
           path: .burnt-workflows
           persist-credentials: false
-      # A 1Password-sourced policy reads the target's item (one custom field per
-      # declared name) into a private {vars, secrets} file that the steps below
-      # consume exactly as they consume a bundle. Previews load it too, so a
-      # missing or mistyped field fails before anything is built.
+      # The loader resolves the selected target's runtime values into the
+      # private {vars, secrets} file consumed by the deployment steps.
       - name: Install 1Password CLI
-        if: fromJSON(inputs.deployment-policy).configurationSource == '1password'
+        if: fromJSON(inputs.deployment-policy).configurationSource == '1password' && fromJSON(inputs.deployment-policy).onePasswordBroker != true
         uses: 1password/install-cli-action@1a3160d5e9de1ae0803eaa08a88746f5ae3daa50 # v4.1.0
         with:
-          version: 2.41.1
+          version: 2.42.0
       - name: Load runtime configuration from 1Password
-        if: fromJSON(inputs.deployment-policy).configurationSource == '1password'
+        if: fromJSON(inputs.deployment-policy).configurationSource == '1password' && fromJSON(inputs.deployment-policy).onePasswordBroker != true
         working-directory: ${{ github.workspace }}
         env:
           OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets[fromJSON(inputs.deployment-policy).onePasswordTokenSecret] }}
-          CONFIGURATION_ITEM: ${{ fromJSON(inputs.deployment-policy).targets[inputs.target].configurationItem }}
+          CONFIGURATION_ENVIRONMENT: ${{ fromJSON(inputs.deployment-policy).targets[inputs.target].configurationEnvironment }}
+          NETWORK_CONFIGURATION: ${{ toJSON(fromJSON(inputs.deployment-policy).targets[inputs.target].networkConfiguration) }}
           SECRET_NAMES: ${{ toJSON(fromJSON(inputs.deployment-policy).workerSecrets) }}
           VARIABLE_NAMES: ${{ toJSON(fromJSON(inputs.deployment-policy).workerVariables) }}
           OUTPUT_FILE: ${{ runner.temp }}/environment.json
         run: node .burnt-workflows/scripts/onepassword-cli.mjs
-      # A bundle always generates the target Wrangler config; a 1Password item
-      # does only when it supplies public vars, so a secrets-only item keeps the
+      - name: Install 1Password Broker SDK
+        if: fromJSON(inputs.deployment-policy).onePasswordBroker == true
+        working-directory: ${{ github.workspace }}
+        run: npm ci --prefix .burnt-workflows/scripts/onepassword-broker --ignore-scripts --no-audit --no-fund
+      - name: Load runtime configuration from 1Password Broker
+        if: fromJSON(inputs.deployment-policy).onePasswordBroker == true
+        working-directory: ${{ github.workspace }}
+        env:
+          OP_INTEGRATION_KEY: ${{ secrets.OP_INTEGRATION_KEY }}
+          OP_WORKLOAD_ID: ${{ vars.OP_WORKLOAD_ID }}
+          OP_NETWORK_WORKLOAD_ID: ${{ vars.OP_NETWORK_WORKLOAD_ID }}
+          CONFIGURATION_ENVIRONMENT: ${{ fromJSON(inputs.deployment-policy).targets[inputs.target].configurationEnvironment }}
+          NETWORK_CONFIGURATION: ${{ toJSON(fromJSON(inputs.deployment-policy).targets[inputs.target].networkConfiguration) }}
+          SECRET_NAMES: ${{ toJSON(fromJSON(inputs.deployment-policy).workerSecrets) }}
+          VARIABLE_NAMES: ${{ toJSON(fromJSON(inputs.deployment-policy).workerVariables) }}
+          OUTPUT_FILE: ${{ runner.temp }}/environment.json
+        run: node .burnt-workflows/scripts/onepassword-broker/cli.mjs
+      # A bundle always generates the target Wrangler config; a 1Password Environment
+      # does only when it supplies public vars, so a secrets-only Environment keeps the
       # checked-in vars untouched.
       - name: Materialize public Worker variables
         if: >-

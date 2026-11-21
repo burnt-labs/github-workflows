@@ -258,7 +258,10 @@ test("Phala requires policy before running consumer quality", () => {
   const workflow = parse(
     fs.readFileSync(`${directory}/phala-deploy.yml`, "utf8"),
   );
-  assert.match(workflow.jobs.policy.steps.at(-1).run, /--phala/);
+  const policy = workflow.jobs.policy.steps.find(
+    (step) => step.id === "policy",
+  );
+  assert.match(policy.run, /--phala/);
   assert.equal(workflow.jobs.quality.needs, "policy");
   assert.deepEqual(workflow.jobs.deploy.needs, ["policy", "quality"]);
 });
@@ -1924,7 +1927,7 @@ test("Phala reseal builds nothing and runs only the pinned central tool", () => 
   const job = workflow.jobs.reseal;
   const source = JSON.stringify(job);
   assert.doesNotMatch(source, /build-push-action|docker\/login-action|npx /);
-  assert.equal(job.permissions, undefined);
+  assert.deepEqual(job.permissions, { contents: "read", "id-token": "write" });
   const tools = job.steps.find(
     (step) => step.with?.path === ".burnt-phala-tools",
   );
@@ -2004,7 +2007,7 @@ test("Phala deploys a prebuilt image only by an explicit, pullable digest", () =
     );
 });
 
-test("Cloudflare reads a 1Password item into the bundle path and always removes it", () => {
+test("Cloudflare reads a 1Password Environment into the bundle path and always removes it", () => {
   const workflow = parse(
     fs.readFileSync(`${directory}/cloudflare-version.yml`, "utf8"),
   );
@@ -2015,7 +2018,7 @@ test("Cloudflare reads a 1Password item into the bundle path and always removes 
   for (const step of [install, load])
     assert.equal(
       step.if,
-      "fromJSON(inputs.deployment-policy).configurationSource == '1password'",
+      "fromJSON(inputs.deployment-policy).configurationSource == '1password' && fromJSON(inputs.deployment-policy).onePasswordBroker != true",
     );
   assert.match(install.uses, /^1password\/install-cli-action@[0-9a-f]{40}$/);
   assert.match(install.with.version, /^\d+\.\d+\.\d+$/);
@@ -2025,8 +2028,12 @@ test("Cloudflare reads a 1Password item into the bundle path and always removes 
     /secrets\[fromJSON\(inputs\.deployment-policy\)\.onePasswordTokenSecret\]/,
   );
   assert.match(
-    load.env.CONFIGURATION_ITEM,
-    /targets\[inputs\.target\]\.configurationItem/,
+    load.env.CONFIGURATION_ENVIRONMENT,
+    /targets\[inputs\.target\]\.configurationEnvironment/,
+  );
+  assert.match(
+    load.env.NETWORK_CONFIGURATION,
+    /targets\[inputs\.target\]\.networkConfiguration/,
   );
   assert.match(load.env.SECRET_NAMES, /workerSecrets/);
   assert.match(load.env.VARIABLE_NAMES, /workerVariables/);
@@ -2068,7 +2075,23 @@ test("Cloudflare reads a 1Password item into the bundle path and always removes 
   );
 });
 
-test("Phala deploy and reseal read a 1Password item only when policy names its token", () => {
+test("Phala rejects an unconfigured target before deploy or reseal", () => {
+  const workflow = parse(
+    fs.readFileSync(`${directory}/phala-deploy.yml`, "utf8"),
+  );
+  const guard = workflow.jobs.policy.steps.find(
+    (step) => step.name === "Require the selected target in policy",
+  );
+  assert.match(
+    guard.if,
+    /fromJSON\(steps\.policy\.outputs\.phala\)\.targets\[inputs\.target\] == null/,
+  );
+  assert.match(guard.run, /exit 1$/m);
+  assert.ok(workflow.jobs.deploy.needs.includes("policy"));
+  assert.ok(workflow.jobs.reseal.needs.includes("policy"));
+});
+
+test("Phala deploy and reseal read a 1Password Environment only when policy names its token", () => {
   const workflow = parse(
     fs.readFileSync(`${directory}/phala-deploy.yml`, "utf8"),
   );
@@ -2085,8 +2108,12 @@ test("Phala deploy and reseal read a 1Password item only when policy names its t
     assert.match(load.run, /onepassword-cli\.mjs"?$/);
     assert.match(load.env.OP_SERVICE_ACCOUNT_TOKEN, /onePasswordTokenSecret\]/);
     assert.match(
-      load.env.CONFIGURATION_ITEM,
-      /targets\[inputs\.target\]\.configurationItem/,
+      load.env.CONFIGURATION_ENVIRONMENT,
+      /targets\[inputs\.target\]\.configurationEnvironment/,
+    );
+    assert.match(
+      load.env.NETWORK_CONFIGURATION,
+      /targets\[inputs\.target\]\.networkConfiguration/,
     );
     assert.match(load.env.SECRET_NAMES, /runtimeSecrets/);
     assert.match(load.env.VARIABLE_NAMES, /runtimeVariables/);
@@ -2124,4 +2151,53 @@ test("Phala deploy and reseal read a 1Password item only when policy names its t
       .RUNTIME_CONFIGURATION_FILE,
     "${{ runner.temp }}/phala-runtime.json",
   );
+});
+
+test("Cloudflare PR previews support workload identity and keep legacy tokens out", () => {
+  const pr = parse(fs.readFileSync(`${directory}/cloudflare-pr.yml`, "utf8"));
+  const version = parse(
+    fs.readFileSync(`${directory}/cloudflare-version.yml`, "utf8"),
+  );
+  assert.match(
+    pr.jobs["preview-candidate"].if,
+    /configurationSource != '1password'/,
+  );
+  assert.match(version.jobs.version.if, /configurationSource != '1password'/);
+  assert.match(version.jobs.version.if, /pull_request","pull_request_target/);
+  assert.equal(pr.jobs.quality.environment, undefined);
+  assert.match(pr.jobs["preview-candidate"].if, /onePasswordBroker == true/);
+  assert.match(version.jobs.version.if, /onePasswordBroker == true/);
+  assert.equal(pr.jobs["preview-candidate"].permissions["id-token"], "write");
+  assert.equal(version.jobs.version.permissions["id-token"], "write");
+  const broker = version.jobs.version.steps.find(
+    (step) => step.name === "Load runtime configuration from 1Password Broker",
+  );
+  assert.equal(
+    broker.env.OP_INTEGRATION_KEY,
+    "${{ secrets.OP_INTEGRATION_KEY }}",
+  );
+  assert.equal(broker.env.OP_WORKLOAD_ID, "${{ vars.OP_WORKLOAD_ID }}");
+  assert.equal(broker.env.OUTPUT_FILE, "${{ runner.temp }}/environment.json");
+});
+
+test("Phala requests workload identity only through the pinned deploy and reseal jobs", () => {
+  const workflow = parse(
+    fs.readFileSync(`${directory}/phala-deploy.yml`, "utf8"),
+  );
+  for (const name of ["deploy", "reseal"]) {
+    const job = workflow.jobs[name];
+    assert.equal(job.permissions["id-token"], "write");
+    assert.ok(job.environment);
+    const load = job.steps.find(
+      (step) =>
+        step.name === "Load runtime configuration from 1Password Broker",
+    );
+    assert.match(load.if, /credentials\.onePasswordBroker == true/);
+    assert.equal(
+      load.env.OP_INTEGRATION_KEY,
+      "${{ secrets.OP_INTEGRATION_KEY }}",
+    );
+    assert.equal(load.env.OP_WORKLOAD_ID, "${{ vars.OP_WORKLOAD_ID }}");
+    assert.ok(!Object.hasOwn(load.env, "OP_SERVICE_ACCOUNT_TOKEN"));
+  }
 });

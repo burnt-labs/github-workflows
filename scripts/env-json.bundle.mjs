@@ -1107,27 +1107,72 @@ function validateBuildInputs({ buildVariables, buildAssets } = {}) {
 }
 
 // scripts/onepassword.mjs
-var segment = "[^/\\s](?:[^/\\t\\n\\r]*[^/\\s])?";
-var referencePattern = new RegExp(`^op://(${segment})/(${segment})$`);
+var environmentIdPattern = /^[a-z2-7]{26}$/;
+var namePattern = /^[A-Z][A-Z0-9_]*$/;
 function check(condition, message) {
   if (!condition) throw new Error(message);
 }
-function parseItemReference(reference) {
-  const match =
-    typeof reference === "string" ? reference.match(referencePattern) : null;
+function validateEnvironmentId(id, label) {
   check(
-    match,
-    "1Password configuration must be an op://<vault>/<item> reference",
+    typeof id === "string" && environmentIdPattern.test(id),
+    `${label} must be a 26-character 1Password Environment ID`,
   );
-  return { vault: match[1], item: match[2] };
+  return id;
 }
-function validateItemReference(reference, label) {
-  try {
-    parseItemReference(reference);
-  } catch {
-    throw new Error(`${label} must be an op://<vault>/<item> reference`);
+function validateConfigurationSources(target, names, label) {
+  const { configurationEnvironment, networkConfiguration } = target;
+  if (networkConfiguration === void 0) {
+    validateEnvironmentId(
+      configurationEnvironment,
+      `${label}.configurationEnvironment`,
+    );
+    return;
   }
-  return reference;
+  const networkLabel = `${label}.networkConfiguration`;
+  check(
+    networkConfiguration !== null &&
+      typeof networkConfiguration === "object" &&
+      !Array.isArray(networkConfiguration),
+    `${networkLabel} must be an object`,
+  );
+  const { environment, variables } = networkConfiguration;
+  validateEnvironmentId(environment, `${networkLabel}.environment`);
+  check(
+    variables &&
+      typeof variables === "object" &&
+      !Array.isArray(variables) &&
+      Object.keys(variables).length > 0,
+    `${networkLabel}.variables must be a non-empty map of runtime names to network keys`,
+  );
+  const appNames = [
+    ...names.secrets,
+    ...(names.workflowVariables || []),
+    ...names.variables.filter((name) => !Object.hasOwn(variables, name)),
+  ];
+  for (const [name, key] of Object.entries(variables)) {
+    check(
+      names.variables.includes(name),
+      `${networkLabel}.variables must map a declared public runtime name: ${name}`,
+    );
+    check(
+      typeof key === "string" && namePattern.test(key),
+      `${networkLabel}.variables must use uppercase network keys`,
+    );
+    check(
+      !appNames.includes(key),
+      `App runtime name ${key} shadows a network key`,
+    );
+  }
+  if (configurationEnvironment !== void 0 || appNames.length > 0) {
+    validateEnvironmentId(
+      configurationEnvironment,
+      `${label}.configurationEnvironment`,
+    );
+    check(
+      configurationEnvironment !== environment,
+      `${label} app and network Environments must differ`,
+    );
+  }
 }
 
 // scripts/policy.mjs
@@ -1292,25 +1337,42 @@ function validateDeploymentPolicy(policy) {
     throw new Error(
       "deployment onePasswordTokenSecret must be an uppercase secret name",
     );
+  if (policy.onePasswordBroker !== void 0 && policy.onePasswordBroker !== true)
+    throw new Error("deployment onePasswordBroker must be true when selected");
+  if (
+    policy.onePasswordBroker &&
+    (policy.environmentSecret || policy.onePasswordTokenSecret)
+  )
+    throw new Error(
+      "deployment selects either 1Password Broker, a service account token, or a bundle",
+    );
   if (policy.onePasswordTokenSecret && policy.environmentSecret)
     throw new Error(
       "deployment runtime configuration comes from onePasswordTokenSecret or environmentSecret, not both",
     );
   if (
-    policy.onePasswordTokenSecret &&
+    (policy.onePasswordTokenSecret || policy.onePasswordBroker) &&
     [...policy.workerVariables, ...policy.workerSecrets].some(
       (name) =>
-        controlNames.has(name) || name === policy.onePasswordTokenSecret,
+        controlNames.has(name) ||
+        name === policy.onePasswordTokenSecret ||
+        (policy.onePasswordBroker &&
+          [
+            "OP_INTEGRATION_KEY",
+            "OP_WORKLOAD_ID",
+            "OP_NETWORK_WORKLOAD_ID",
+          ].includes(name)),
     )
   )
     throw new Error(
       "deployment runtime configuration must not name a control credential",
     );
-  policy.configurationSource = policy.onePasswordTokenSecret
-    ? "1password"
-    : policy.environmentSecret
-      ? "bundle"
-      : "github";
+  policy.configurationSource =
+    policy.onePasswordTokenSecret || policy.onePasswordBroker
+      ? "1password"
+      : policy.environmentSecret
+        ? "bundle"
+        : "github";
   if (policy.configurationSource === "github" && policy.workerVariables.length)
     throw new Error(
       "deployment workerVariables requires onePasswordTokenSecret or environmentSecret",
@@ -1383,19 +1445,25 @@ function validateDeploymentPolicy(policy) {
     for (const field of ["githubEnvironment", "url"]) {
       requireString(target[field], `deployment targets.${role}.${field}`);
     }
+    if (target.configurationItem !== void 0)
+      throw new Error(
+        `deployment targets.${role}.configurationItem was replaced by configurationEnvironment`,
+      );
     if (policy.configurationSource === "1password")
-      validateItemReference(
-        target.configurationItem,
-        `deployment targets.${role}.configurationItem`,
+      validateConfigurationSources(
+        target,
+        { secrets: policy.workerSecrets, variables: policy.workerVariables },
+        `deployment targets.${role}`,
       );
     else if (
-      target.configurationItem !== void 0 &&
-      target.configurationItem !== ""
+      (target.configurationEnvironment !== void 0 &&
+        target.configurationEnvironment !== "") ||
+      target.networkConfiguration !== void 0
     )
       throw new Error(
-        `deployment targets.${role}.configurationItem requires onePasswordTokenSecret`,
+        `deployment targets.${role}.configurationEnvironment requires onePasswordTokenSecret, as does networkConfiguration`,
       );
-    else target.configurationItem = "";
+    else target.configurationEnvironment = "";
     if (single) {
       if (target.wranglerEnv !== void 0) {
         throw new Error(
@@ -1613,7 +1681,20 @@ function materializePublicConfiguration(options) {
     throw new Error(
       "Source Wrangler configuration does not contain the selected environment",
     );
-  scope.vars = values.vars;
+  if (selected.networkConfiguration) {
+    const existing = scope.vars ?? {};
+    if (!object2(existing))
+      throw new Error("Source Wrangler vars must be an object");
+    for (const name of Object.keys(values.vars)) {
+      if (Object.hasOwn(existing, name))
+        throw new Error(
+          `Source Wrangler vars already define 1Password key ${name}`,
+        );
+    }
+    scope.vars = { ...existing, ...values.vars };
+  } else {
+    scope.vars = values.vars;
+  }
   fs.writeFileSync(
     files.generated,
     `${JSON.stringify(config, null, 2)}

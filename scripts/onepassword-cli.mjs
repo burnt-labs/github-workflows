@@ -1,10 +1,10 @@
-// Load a target's runtime configuration from its 1Password item into a private
+// Load a target's runtime configuration from its 1Password sources into a private
 // {vars, secrets} file for the shared deploy steps. Values never reach the log:
-// every secret is masked before anything else is printed, and errors name
-// fields only.
+// every secret is masked before anything else is printed, and errors identify
+// keys only.
 import fs from "node:fs";
 import { spawnSync } from "node:child_process";
-import { itemValues, loadItem, maskCommands } from "./onepassword.mjs";
+import { loadConfiguration, maskCommands } from "./onepassword.mjs";
 
 try {
   const token = process.env.OP_SERVICE_ACCOUNT_TOKEN;
@@ -26,14 +26,26 @@ try {
     if (result.status !== 0) throw new Error("1Password CLI failed");
     return result.stdout;
   };
-  const item = await loadItem(run, process.env.CONFIGURATION_ITEM);
-  const values = itemValues(item, {
-    secrets: JSON.parse(process.env.SECRET_NAMES || "[]"),
-    variables: JSON.parse(process.env.VARIABLE_NAMES || "[]"),
-  });
+  const values = await loadConfiguration(
+    run,
+    {
+      configurationEnvironment:
+        process.env.CONFIGURATION_ENVIRONMENT || undefined,
+      networkConfiguration: JSON.parse(
+        process.env.NETWORK_CONFIGURATION || "null",
+      ),
+    },
+    {
+      secrets: JSON.parse(process.env.SECRET_NAMES || "[]"),
+      variables: JSON.parse(process.env.VARIABLE_NAMES || "[]"),
+      workflowVariables: JSON.parse(
+        process.env.WORKFLOW_VARIABLE_NAMES || "[]",
+      ),
+    },
+  );
   for (const command of maskCommands(values))
     process.stdout.write(`${command}\n`);
-  fs.writeFileSync(output, JSON.stringify(values), { mode: 0o600 });
+  fs.writeFileSync(output, JSON.stringify(values), { mode: 0o600, flag: "wx" });
   process.stdout.write(
     `Loaded ${Object.keys(values.vars).length} public values and ${Object.keys(values.secrets).length} secrets from 1Password\n`,
   );

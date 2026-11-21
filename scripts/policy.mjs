@@ -5,7 +5,7 @@ import { parse, printParseErrorCode } from "jsonc-parser";
 import { validateBuildInputs } from "./frontend-build.mjs";
 import { validateInfrastructure } from "./phala-setup.mjs";
 import { validateTargetConfiguration } from "./phala-configuration.mjs";
-import { validateItemReference } from "./onepassword.mjs";
+import { validateConfigurationSources } from "./onepassword.mjs";
 
 const QUALITY_PATH = ".github/quality-policy.jsonc";
 const DEPLOYMENT_PATH = ".github/deployment-policy.jsonc";
@@ -265,8 +265,8 @@ export function validateDeploymentPolicy(policy) {
     }
   }
   // Runtime configuration has exactly one source per policy: individual GitHub
-  // Environment secrets, the legacy JSON bundle, or a 1Password item per target
-  // (one custom field per declared name). New policies use 1Password.
+  // Environment secrets, the legacy JSON bundle, or the 1Password sources
+  // declared for each target. New policies use 1Password.
   if (policy.onePasswordTokenSecret === undefined)
     policy.onePasswordTokenSecret = "";
   if (
@@ -277,25 +277,45 @@ export function validateDeploymentPolicy(policy) {
     throw new Error(
       "deployment onePasswordTokenSecret must be an uppercase secret name",
     );
+  if (
+    policy.onePasswordBroker !== undefined &&
+    policy.onePasswordBroker !== true
+  )
+    throw new Error("deployment onePasswordBroker must be true when selected");
+  if (
+    policy.onePasswordBroker &&
+    (policy.environmentSecret || policy.onePasswordTokenSecret)
+  )
+    throw new Error(
+      "deployment selects either 1Password Broker, a service account token, or a bundle",
+    );
   if (policy.onePasswordTokenSecret && policy.environmentSecret)
     throw new Error(
       "deployment runtime configuration comes from onePasswordTokenSecret or environmentSecret, not both",
     );
   if (
-    policy.onePasswordTokenSecret &&
+    (policy.onePasswordTokenSecret || policy.onePasswordBroker) &&
     [...policy.workerVariables, ...policy.workerSecrets].some(
       (name) =>
-        controlNames.has(name) || name === policy.onePasswordTokenSecret,
+        controlNames.has(name) ||
+        name === policy.onePasswordTokenSecret ||
+        (policy.onePasswordBroker &&
+          [
+            "OP_INTEGRATION_KEY",
+            "OP_WORKLOAD_ID",
+            "OP_NETWORK_WORKLOAD_ID",
+          ].includes(name)),
     )
   )
     throw new Error(
       "deployment runtime configuration must not name a control credential",
     );
-  policy.configurationSource = policy.onePasswordTokenSecret
-    ? "1password"
-    : policy.environmentSecret
-      ? "bundle"
-      : "github";
+  policy.configurationSource =
+    policy.onePasswordTokenSecret || policy.onePasswordBroker
+      ? "1password"
+      : policy.environmentSecret
+        ? "bundle"
+        : "github";
   if (policy.configurationSource === "github" && policy.workerVariables.length)
     throw new Error(
       "deployment workerVariables requires onePasswordTokenSecret or environmentSecret",
@@ -390,19 +410,25 @@ export function validateDeploymentPolicy(policy) {
     for (const field of ["githubEnvironment", "url"]) {
       requireString(target[field], `deployment targets.${role}.${field}`);
     }
+    if (target.configurationItem !== undefined)
+      throw new Error(
+        `deployment targets.${role}.configurationItem was replaced by configurationEnvironment`,
+      );
     if (policy.configurationSource === "1password")
-      validateItemReference(
-        target.configurationItem,
-        `deployment targets.${role}.configurationItem`,
+      validateConfigurationSources(
+        target,
+        { secrets: policy.workerSecrets, variables: policy.workerVariables },
+        `deployment targets.${role}`,
       );
     else if (
-      target.configurationItem !== undefined &&
-      target.configurationItem !== ""
+      (target.configurationEnvironment !== undefined &&
+        target.configurationEnvironment !== "") ||
+      target.networkConfiguration !== undefined
     )
       throw new Error(
-        `deployment targets.${role}.configurationItem requires onePasswordTokenSecret`,
+        `deployment targets.${role}.configurationEnvironment requires onePasswordTokenSecret, as does networkConfiguration`,
       );
-    else target.configurationItem = "";
+    else target.configurationEnvironment = "";
 
     if (single) {
       // There is no wrangler environment to name. These repositories have no
@@ -679,8 +705,17 @@ export function validatePhalaPolicy(policy) {
     throw new Error("Phala credential secret names must differ");
   }
   // Runtime values come either from the target GitHub Environment (one secret or
-  // variable per name) or from one 1Password item per target.
+  // variable per name) or from the 1Password sources declared for each target.
   const onePasswordToken = policy.credentials.onePasswordTokenSecret;
+  const broker = policy.credentials.onePasswordBroker;
+  if (broker !== undefined && broker !== true)
+    throw new Error(
+      "Phala credentials.onePasswordBroker must be true when selected",
+    );
+  if (broker && onePasswordToken !== undefined)
+    throw new Error(
+      "Phala selects either 1Password Broker or a service account token",
+    );
   if (onePasswordToken !== undefined) {
     requireString(onePasswordToken, "Phala credentials.onePasswordTokenSecret");
     if (
@@ -704,6 +739,9 @@ export function validatePhalaPolicy(policy) {
     policy.credentials.phalaApiKeySecret,
     policy.credentials.registryPasswordSecret,
     ...(onePasswordToken ? [onePasswordToken] : []),
+    ...(broker
+      ? ["OP_INTEGRATION_KEY", "OP_WORKLOAD_ID", "OP_NETWORK_WORKLOAD_ID"]
+      : []),
   ];
   const secretNames = validateEnvironmentNames(
     policy.runtimeSecrets,
@@ -723,9 +761,26 @@ export function validatePhalaPolicy(policy) {
     }
   }
 
-  for (const role of ["candidate", "release"]) {
-    const target = policy.targets?.[role];
-    if (!target || typeof target !== "object") {
+  const workflowVariableNames = validateEnvironmentNames(
+    policy.workflowVariables === undefined ? [] : policy.workflowVariables,
+    "Phala workflowVariables",
+    [...reserved, ...secretNames, ...variableNames],
+  );
+  if (workflowVariableNames.size && !(onePasswordToken || broker))
+    throw new Error("Phala workflowVariables requires 1Password");
+
+  const targets = policy.targets;
+  if (!targets || typeof targets !== "object" || Array.isArray(targets))
+    throw new Error("Phala targets must declare candidate, release, or both");
+  const roles = Object.keys(targets);
+  if (
+    roles.length === 0 ||
+    roles.some((role) => role !== "candidate" && role !== "release")
+  )
+    throw new Error("Phala targets must declare candidate, release, or both");
+  for (const role of roles) {
+    const target = targets[role];
+    if (!target || typeof target !== "object" || Array.isArray(target)) {
       throw new Error(`Phala targets.${role} must be an object`);
     }
     requireString(
@@ -733,18 +788,30 @@ export function validatePhalaPolicy(policy) {
       `Phala targets.${role}.githubEnvironment`,
     );
     requireString(target.cvmName, `Phala targets.${role}.cvmName`);
-    if (onePasswordToken) {
-      validateItemReference(
-        target.configurationItem,
-        `Phala targets.${role}.configurationItem`,
+    if (target.configurationItem !== undefined)
+      throw new Error(
+        `Phala targets.${role}.configurationItem was replaced by configurationEnvironment`,
+      );
+    if (onePasswordToken || broker) {
+      validateConfigurationSources(
+        target,
+        {
+          secrets: policy.runtimeSecrets,
+          variables: policy.runtimeVariables,
+          workflowVariables: policy.workflowVariables,
+        },
+        `Phala targets.${role}`,
       );
       if (target.configuration !== undefined)
         throw new Error(
-          `Phala targets.${role} takes its values from configurationItem, not a configuration bundle`,
+          `Phala targets.${role} takes its values from configurationEnvironment, not a configuration bundle`,
         );
-    } else if (target.configurationItem !== undefined)
+    } else if (
+      target.configurationEnvironment !== undefined ||
+      target.networkConfiguration !== undefined
+    )
       throw new Error(
-        `Phala targets.${role}.configurationItem requires credentials.onePasswordTokenSecret`,
+        `Phala targets.${role}.configurationEnvironment requires credentials.onePasswordTokenSecret, as does networkConfiguration`,
       );
     if (target.setup !== undefined) validateInfrastructure(target.setup);
     validateTargetConfiguration(target, policy.runtimeVariables);
